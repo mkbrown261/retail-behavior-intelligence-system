@@ -16,6 +16,8 @@ const NAV = [
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 const IS_DEMO = !API_BASE
+/* eslint-disable no-undef */
+const _BUILD = typeof __BUILD_TS__ !== 'undefined' ? __BUILD_TS__ : 0
 
 function NavItem({ to, label, icon: Icon }) {
   return (
