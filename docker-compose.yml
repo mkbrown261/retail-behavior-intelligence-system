@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  rbis:
+    build: ./backend
+    container_name: rbis
+    restart: unless-stopped
+    ports:
+      - "8000:8000"          # Dashboard + API: http://localhost:8000
+    volumes:
+      - ./data:/app/data     # Persistent DB + snapshots/clips/reports
+      - ./backend/cameras.yaml:/app/cameras.yaml  # Camera config (edit this file)
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./data/rbis.db
+      - LOCAL_STORAGE_PATH=./data
+      - PORT=8000
+    devices:
+      # Uncomment the lines below to pass through USB cameras to the container:
+      # - /dev/video0:/dev/video0   # first USB camera
+      # - /dev/video1:/dev/video1   # second USB camera
+      []
+    privileged: false        # Set to true only if USB cameras need it
+
+volumes:
+  data:

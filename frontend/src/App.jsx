@@ -3,15 +3,17 @@ import { Routes, Route, NavLink } from 'react-router-dom'
 import LiveDashboard from './pages/LiveDashboard'
 import AnalyticsDashboard from './pages/AnalyticsDashboard'
 import PersonsPage from './pages/PersonsPage'
+import CamerasPage from './pages/CamerasPage'
 import ErrorBoundary from './components/ErrorBoundary'
 import {
-  Monitor, BarChart2, Users, Shield, Eye, AlertTriangle
+  Monitor, BarChart2, Users, Shield, Eye, AlertTriangle, Camera
 } from 'lucide-react'
 
 const NAV = [
   { to: '/',          label: 'Live',       icon: Monitor  },
   { to: '/analytics', label: 'Analytics',  icon: BarChart2 },
   { to: '/persons',   label: 'Persons',    icon: Users    },
+  { to: '/cameras',   label: 'Cameras',    icon: Camera   },
 ]
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
@@ -83,9 +85,10 @@ export default function App() {
         }}>
           <AlertTriangle size={13} style={{ flexShrink: 0 }} />
           <span>
-            <strong>Demo Mode</strong> — No backend connected. Set{' '}
-            <code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 5px', borderRadius: 3 }}>VITE_API_URL</code>
-            {' '}in Cloudflare Pages environment variables to connect your FastAPI backend. Showing empty/default states.
+            <strong>Demo Mode</strong> — Running without a backend. To use live cameras, run the
+            RBIS backend on your computer and open{' '}
+            <code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 5px', borderRadius: 3 }}>http://&lt;your-ip&gt;:8000</code>
+            {' '}on any device on your network.
           </span>
         </div>
       )}
@@ -97,6 +100,7 @@ export default function App() {
             <Route path="/"          element={<LiveDashboard />} />
             <Route path="/analytics" element={<AnalyticsDashboard />} />
             <Route path="/persons"   element={<PersonsPage />} />
+            <Route path="/cameras"   element={<CamerasPage />} />
           </Routes>
         </ErrorBoundary>
       </main>

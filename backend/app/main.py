@@ -4,12 +4,14 @@ Main FastAPI application entry point.
 import asyncio
 import logging
 import os
+import socket
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.core.config import settings
 from app.core.database import init_db
@@ -147,3 +149,58 @@ async def system_status():
             "streams": [c["camera_id"] for c in camera_manager.get_all_info()],
         },
     }
+
+
+@app.get("/api/network-info")
+async def network_info():
+    """Return the server's local IP addresses so the UI can show the QR-code URL."""
+    ips = []
+    try:
+        # Get all non-loopback IPv4 addresses
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None):
+            ip = info[4][0]
+            if ip and not ip.startswith("127.") and ":" not in ip:
+                if ip not in ips:
+                    ips.append(ip)
+    except Exception:
+        pass
+    # Fallback: connect outward and read local address
+    if not ips:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ips.append(s.getsockname()[0])
+            s.close()
+        except Exception:
+            ips.append("127.0.0.1")
+    port = int(os.environ.get("PORT", 8000))
+    return {
+        "ips":   ips,
+        "port":  port,
+        "urls":  [f"http://{ip}:{port}" for ip in ips],
+    }
+
+
+# ── Serve built frontend (self-hosted mode) ───────────────────────────────────
+# When the frontend is built into backend/static/ui/, the backend serves it
+# at / so users just open http://<ip>:8000 on any device on the same network.
+
+_UI_DIR = Path(__file__).parent.parent / "static" / "ui"
+
+if _UI_DIR.exists():
+    # Serve static assets (JS/CSS/images)
+    app.mount("/assets", StaticFiles(directory=str(_UI_DIR / "assets")), name="ui-assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        """Catch-all: serve index.html for any non-API path (React SPA routing)."""
+        # Don't intercept API routes or media
+        if full_path.startswith("api/") or full_path.startswith("media/") or full_path.startswith("ws"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404)
+        index = _UI_DIR / "index.html"
+        if index.exists():
+            return FileResponse(str(index))
+        return JSONResponse({"detail": "UI not found"}, status_code=404)
+
