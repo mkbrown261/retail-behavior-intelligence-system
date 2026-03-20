@@ -231,6 +231,7 @@ class CameraStream:
             "reconnect_count":  self._reconnect_count,
             "last_frame_ts":    self._last_frame_ts,
             "has_frame":        self.latest_frame is not None,
+            "extra":            self.cfg.extra,
         }
 
     # ── Capture loop ──────────────────────────────────────────────────────────
