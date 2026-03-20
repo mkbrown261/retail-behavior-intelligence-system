@@ -4,10 +4,10 @@
 
 ---
 
-## 🖥️ Live Dashboard
-- **Frontend:** React + Vite (port 5173)
-- **Backend API:** FastAPI + Python (port 8000)
-- **API Docs:** `http://localhost:8000/api/docs`
+## 🖥️ Live URLs
+- **Cloudflare Pages (Frontend):** https://rbis-dashboard.pages.dev
+- **GitHub Repository:** https://github.com/mkbrown261/retail-behavior-intelligence-system
+- **API Docs (local):** `http://localhost:8000/api/docs`
 
 ---
 
