@@ -17,6 +17,10 @@ from app.services.video_pipeline import pipeline
 from app.services.event_orchestrator import handle_detection
 from app.camera.camera_manager import camera_manager
 from app.api import persons, alerts, analytics, cameras, events
+# cameras module exports two routers:
+#   cameras.router    → mounted with prefix="/api"   (REST endpoints)
+#   cameras.ws_router → mounted without prefix       (WebSocket + legacy /cameras/*)
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -106,11 +110,12 @@ app.add_middleware(
 )
 
 # ── API Routers ───────────────────────────────────────────────────────────────
-app.include_router(persons.router, prefix="/api")
-app.include_router(alerts.router, prefix="/api")
-app.include_router(analytics.router, prefix="/api")
-app.include_router(cameras.router)
-app.include_router(events.router, prefix="/api")
+app.include_router(persons.router,    prefix="/api")
+app.include_router(alerts.router,     prefix="/api")
+app.include_router(analytics.router,  prefix="/api")
+app.include_router(cameras.router,    prefix="/api")   # REST: /api/cameras/*, /api/ws/status
+app.include_router(cameras.ws_router)                   # WS:   /ws/{id}, /ws, /cameras/feeds (legacy)
+app.include_router(events.router,     prefix="/api")
 
 # ── Static media files ────────────────────────────────────────────────────────
 media_path = settings.LOCAL_STORAGE_PATH

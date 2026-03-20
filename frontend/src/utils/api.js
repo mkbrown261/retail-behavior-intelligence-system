@@ -49,9 +49,17 @@ export const eventsAPI = {
 
 // Cameras
 export const cameraAPI = {
-  feeds:       () => api.get('/cameras/feeds'),
-  feed:        (id) => api.get(`/cameras/${id}/feed`),
-  wsStatus:    () => api.get('/ws/status'),
+  feeds:        ()              => api.get('/cameras/feeds'),
+  feed:         (id)            => api.get(`/cameras/${id}/feed`),
+  wsStatus:     ()              => api.get('/ws/status'),
+  list:         ()              => api.get('/cameras'),
+  get:          (id)            => api.get(`/cameras/${id}`),
+  add:          (data)          => api.post('/cameras', data),
+  remove:       (id)            => api.delete(`/cameras/${id}`),
+  restart:      (id)            => api.post(`/cameras/${id}/restart`),
+  snapshotB64:  (id, q = 70)    => api.get(`/cameras/${id}/snapshot.b64`, { params: { quality: q } }),
+  intentStats:  ()              => api.get('/cameras/intent/stats'),
+  discoverOnvif:(u = '', p = '') => api.post('/cameras/discover/onvif', null, { params: { username: u, password: p } }),
 }
 
 // System

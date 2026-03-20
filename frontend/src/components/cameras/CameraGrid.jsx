@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { cameraAPI } from '../../utils/api'
 import api from '../../utils/api'
+// Snapshot URL helper — uses the baked-in backend URL
+const BACKEND = import.meta.env.VITE_API_URL || ''
 
 const CAMERA_NAMES = ['Entrance', 'Aisle A', 'Aisle B', 'Aisle C', 'Checkout/Exit']
 const LEVEL_COLORS = { NORMAL: '#3fb950', WATCH: '#d29922', HIGH_SUSPICION: '#f85149' }
@@ -121,7 +123,7 @@ function RealCameraCard({ cam, onRemove, onRestart }) {
       </div>
       {isLive && (
         <img
-          src={`${import.meta.env.VITE_API_URL||''}/api/cameras/${cam.camera_id}/snapshot?quality=50&t=${Date.now()}`}
+          src={`${BACKEND}/api/cameras/${cam.camera_id}/snapshot?quality=50&t=${Date.now()}`}
           alt={cam.camera_id}
           className="w-full rounded border border-rbis-700 object-cover"
           style={{ height: 90 }}
@@ -144,7 +146,7 @@ function AddCameraModal({ onAdd, onClose }) {
   const submit = async (e) => {
     e.preventDefault(); setError('')
     try {
-      await api.post('/api/cameras', form)
+      await cameraAPI.add(form)
       onAdd()
       onClose()
     } catch(err) {
@@ -212,7 +214,7 @@ export default function CameraGrid({ livePersons = [], cameraFrame }) {
 
   const refreshReal = useCallback(async () => {
     try {
-      const res = await api.get('/api/cameras')
+      const res = await cameraAPI.list()
       setRealCams(res.data?.cameras || [])
     } catch (_) {}
   }, [])
@@ -232,10 +234,10 @@ export default function CameraGrid({ livePersons = [], cameraFrame }) {
   }, [showReal, refreshReal])
 
   const handleRemove = async (id) => {
-    try { await api.delete(`/api/cameras/${id}`); refreshReal() } catch(_) {}
+    try { await cameraAPI.remove(id); refreshReal() } catch(_) {}
   }
   const handleRestart = async (id) => {
-    try { await api.post(`/api/cameras/${id}/restart`); refreshReal() } catch(_) {}
+    try { await cameraAPI.restart(id); refreshReal() } catch(_) {}
   }
 
   return (
