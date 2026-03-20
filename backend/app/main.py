@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.core.database import init_db
 from app.services.video_pipeline import pipeline
 from app.services.event_orchestrator import handle_detection
+from app.camera.camera_manager import camera_manager
 from app.api import persons, alerts, analytics, cameras, events
 
 logging.basicConfig(
@@ -35,6 +36,13 @@ async def lifespan(app: FastAPI):
     # Init DB
     await init_db()
 
+    # ── Camera Manager (Intent Layer) ─────────────────────────────────────────
+    # CameraManager attaches the IntentBus to the event loop, loads cameras.yaml,
+    # and starts per-camera capture threads. All FRAME_READY intents are bridged
+    # to the AI pipeline via the registered callback — no direct coupling.
+    camera_manager.register_frame_callback(handle_detection)
+    await camera_manager.start()
+
     # Register pipeline callback and start
     pipeline.register_callback(handle_detection)
     await pipeline.start()
@@ -47,6 +55,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     await pipeline.stop()
+    await camera_manager.stop()
     logger.info("👋 RBIS shutdown complete")
 
 
@@ -124,8 +133,12 @@ async def system_status():
     from app.core.websocket import manager
     from app.services.scoring import get_all_live_scores
     return {
-        "pipeline_running": pipeline._running,
-        "active_persons": pipeline.get_active_count(),
-        "connected_clients": manager.connection_count,
-        "live_scores": get_all_live_scores(),
+        "pipeline_running":   pipeline._running,
+        "active_persons":     pipeline.get_active_count(),
+        "connected_clients":  manager.connection_count,
+        "live_scores":        get_all_live_scores(),
+        "cameras": {
+            "total":   camera_manager.get_camera_count(),
+            "streams": [c["camera_id"] for c in camera_manager.get_all_info()],
+        },
     }

@@ -1,0 +1,90 @@
+# cameras.yaml — RBIS Camera Configuration
+#
+# Supported cam_type values:
+#   USB    — local webcam via OpenCV VideoCapture(int index)
+#   RTSP   — RTSP/IP camera stream URL
+#   HTTP   — MJPEG-over-HTTP stream
+#   ONVIF  — ONVIF IP camera (resolved to RTSP automatically)
+#   FILE   — pre-recorded video file for testing
+#   MOCK   — synthetic colour frames (no hardware required)
+#
+# All fields except camera_id, cam_type, source are optional.
+# Default resolution: 1280×720  fps: 15
+
+cameras:
+
+  # ── MOCK cameras (built-in, no hardware needed) ───────────────────────────
+  - camera_id: mock_cam_1
+    cam_type:  MOCK
+    source:    "mock://0"
+    width:     1280
+    height:    720
+    fps:       10
+
+  - camera_id: mock_cam_2
+    cam_type:  MOCK
+    source:    "mock://1"
+    width:     1280
+    height:    720
+    fps:       10
+
+  # ── USB webcam examples (comment out if no camera attached) ───────────────
+  # - camera_id: usb_cam_0
+  #   cam_type:  USB
+  #   source:    0           # device index (integer)
+  #   width:     1280
+  #   height:    720
+  #   fps:       30
+
+  # - camera_id: usb_cam_1
+  #   cam_type:  USB
+  #   source:    1
+  #   width:     1920
+  #   height:    1080
+  #   fps:       30
+
+  # ── RTSP / IP camera examples ─────────────────────────────────────────────
+  # - camera_id: entrance_cam
+  #   cam_type:  RTSP
+  #   source:    "rtsp://192.168.1.101:554/stream1"
+  #   username:  "admin"
+  #   password:  "password123"
+  #   width:     1280
+  #   height:    720
+  #   fps:       15
+
+  # - camera_id: aisle_cam_a
+  #   cam_type:  RTSP
+  #   source:    "rtsp://192.168.1.102:554/h264Preview_01_main"
+  #   username:  "admin"
+  #   password:  "securepass"
+  #   width:     1920
+  #   height:    1080
+  #   fps:       25
+
+  # ── ONVIF auto-discovery camera ──────────────────────────────────────────
+  # (ONVIF source is resolved to RTSP URL automatically)
+  # - camera_id: onvif_checkout
+  #   cam_type:  ONVIF
+  #   source:    "rtsp://192.168.1.103:554/stream"   # fallback if ONVIF fails
+  #   username:  "admin"
+  #   password:  "adminpass"
+  #   width:     1280
+  #   height:    720
+  #   fps:       15
+
+  # ── HTTP / MJPEG stream ───────────────────────────────────────────────────
+  # - camera_id: mjpeg_cam
+  #   cam_type:  HTTP
+  #   source:    "http://192.168.1.104:8080/video"
+  #   width:     640
+  #   height:    480
+  #   fps:       10
+
+  # ── File / pre-recorded video (for testing / replay) ─────────────────────
+  # - camera_id: test_footage
+  #   cam_type:  FILE
+  #   source:    "/data/recordings/store_footage.mp4"
+  #   width:     1280
+  #   height:    720
+  #   fps:       25
