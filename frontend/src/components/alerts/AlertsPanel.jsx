@@ -79,10 +79,12 @@ export default function AlertsPanel({ newAlert, onSelectPerson }) {
         alertAPI.list({ limit: 30 }),
         alertAPI.stats(),
       ])
-      setAlerts(alertsRes.data.alerts)
-      setStats(statsRes.data)
+      setAlerts(alertsRes.data?.alerts || [])
+      setStats(statsRes.data || {})
     } catch (e) {
-      console.error(e)
+      console.error('AlertsPanel load error:', e)
+      setAlerts([])
+      setStats({})
     }
     setLoading(false)
   }

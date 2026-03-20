@@ -76,9 +76,13 @@ export default function RepeatVisitorsView() {
           analyticsAPI.repeatVisitors(),
           analyticsAPI.flaggedVisitors(),
         ])
-        setClusters(allRes.data.clusters)
-        setFlagged(flaggedRes.data.flagged_visitors)
-      } catch (e) { console.error(e) }
+        setClusters(allRes.data?.clusters || [])
+        setFlagged(flaggedRes.data?.flagged_visitors || [])
+      } catch (e) {
+        console.error('RepeatVisitorsView load error:', e)
+        setClusters([])
+        setFlagged([])
+      }
       setLoading(false)
     }
     load()

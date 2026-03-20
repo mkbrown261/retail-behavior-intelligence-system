@@ -98,8 +98,11 @@ export default function PersonTimeline({ personId, onClose }) {
       setLoading(true)
       try {
         const res = await personAPI.timeline(personId)
-        setData(res.data)
-      } catch (e) { console.error(e) }
+        setData(res.data || null)
+      } catch (e) {
+        console.error('PersonTimeline load error:', e)
+        setData(null)
+      }
       setLoading(false)
     }
     load()

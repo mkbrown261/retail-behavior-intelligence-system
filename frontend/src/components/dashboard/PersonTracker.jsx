@@ -83,9 +83,10 @@ export default function PersonTracker({ liveScores = [], onSelectPerson }) {
         ? { flagged_only: true, limit: 30 }
         : { limit: 30 }
       const res = await personAPI.list(params)
-      setPersons(res.data.persons)
+      setPersons(res.data?.persons || [])
     } catch (e) {
-      console.error(e)
+      console.error('PersonTracker load error:', e)
+      setPersons([])
     }
     setLoading(false)
   }

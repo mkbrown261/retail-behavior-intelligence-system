@@ -48,10 +48,12 @@ export default function HeatmapView({ day, filterType }) {
           analyticsAPI.heatmap(params),
           analyticsAPI.heatmapHourly(day),
         ])
-        setData(hm.data)
-        setHourlySummary(hourly.data.summary || [])
+        setData(hm.data || { cells: [], total_points: 0, max_weight: 1 })
+        setHourlySummary(hourly.data?.summary || [])
       } catch (e) {
-        console.error(e)
+        console.error('HeatmapView load error:', e)
+        setData({ cells: [], total_points: 0, max_weight: 1 })
+        setHourlySummary([])
       }
       setLoading(false)
     }

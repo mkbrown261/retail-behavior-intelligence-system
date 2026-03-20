@@ -1,10 +1,11 @@
 import React from 'react'
-import { Routes, Route, NavLink, useLocation } from 'react-router-dom'
+import { Routes, Route, NavLink } from 'react-router-dom'
 import LiveDashboard from './pages/LiveDashboard'
 import AnalyticsDashboard from './pages/AnalyticsDashboard'
 import PersonsPage from './pages/PersonsPage'
+import ErrorBoundary from './components/ErrorBoundary'
 import {
-  Monitor, BarChart2, Users, Bell, Shield, Eye
+  Monitor, BarChart2, Users, Shield, Eye, AlertTriangle
 } from 'lucide-react'
 
 const NAV = [
@@ -12,6 +13,9 @@ const NAV = [
   { to: '/analytics', label: 'Analytics',  icon: BarChart2 },
   { to: '/persons',   label: 'Persons',    icon: Users    },
 ]
+
+const API_BASE = import.meta.env.VITE_API_URL || ''
+const IS_DEMO = !API_BASE
 
 function NavItem({ to, label, icon: Icon }) {
   return (
@@ -62,13 +66,37 @@ export default function App() {
         </div>
       </header>
 
+      {/* Offline / Demo mode banner */}
+      {IS_DEMO && (
+        <div style={{
+          background: 'rgba(210,153,34,0.12)',
+          borderBottom: '1px solid rgba(210,153,34,0.35)',
+          padding: '6px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontSize: 12,
+          color: '#d29922',
+          flexWrap: 'wrap',
+        }}>
+          <AlertTriangle size={13} style={{ flexShrink: 0 }} />
+          <span>
+            <strong>Demo Mode</strong> — No backend connected. Set{' '}
+            <code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 5px', borderRadius: 3 }}>VITE_API_URL</code>
+            {' '}in Cloudflare Pages environment variables to connect your FastAPI backend. Showing empty/default states.
+          </span>
+        </div>
+      )}
+
       {/* Page content */}
       <main className="flex-1 max-w-screen-2xl w-full mx-auto px-4 py-4">
-        <Routes>
-          <Route path="/"          element={<LiveDashboard />} />
-          <Route path="/analytics" element={<AnalyticsDashboard />} />
-          <Route path="/persons"   element={<PersonsPage />} />
-        </Routes>
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/"          element={<LiveDashboard />} />
+            <Route path="/analytics" element={<AnalyticsDashboard />} />
+            <Route path="/persons"   element={<PersonsPage />} />
+          </Routes>
+        </ErrorBoundary>
       </main>
 
       {/* Footer */}

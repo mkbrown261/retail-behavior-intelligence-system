@@ -12,8 +12,11 @@ export default function TopIncidentsPanel({ onSelectPerson }) {
     setLoading(true)
     try {
       const res = await alertAPI.topIncidents()
-      setIncidents(res.data.incidents)
-    } catch (e) { console.error(e) }
+      setIncidents(res.data?.incidents || [])
+    } catch (e) {
+      console.error('TopIncidentsPanel load error:', e)
+      setIncidents([])
+    }
     setLoading(false)
   }
 

@@ -135,7 +135,7 @@ export default function CameraGrid({ livePersons = [], cameraFrame }) {
     const refresh = async () => {
       try {
         const res = await cameraAPI.feeds()
-        setFeeds(res.data.feeds)
+        if (res.data?.feeds) setFeeds(res.data.feeds)
       } catch (_) {}
     }
     refresh()

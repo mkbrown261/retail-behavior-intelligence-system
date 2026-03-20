@@ -27,9 +27,13 @@ export default function PersonsPage() {
           personAPI.list(params),
           personAPI.stats(),
         ])
-        setPersons(persRes.data.persons)
-        setStats(statsRes.data)
-      } catch (e) { console.error(e) }
+        setPersons(persRes.data?.persons || [])
+        setStats(statsRes.data || {})
+      } catch (e) {
+        console.error('PersonsPage load error:', e)
+        setPersons([])
+        setStats({})
+      }
       setLoading(false)
     }
     load()

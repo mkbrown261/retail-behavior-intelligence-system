@@ -25,10 +25,13 @@ export default function ReportsView() {
     setLoading(true)
     try {
       const res = await analyticsAPI.reports()
-      const rpts = res.data.reports
+      const rpts = res.data?.reports || []
       setReports(rpts)
       if (rpts.length > 0 && !selected) setSelected(rpts[0])
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error('ReportsView load error:', e)
+      setReports([])
+    }
     setLoading(false)
   }
 

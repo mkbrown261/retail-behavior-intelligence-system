@@ -71,9 +71,11 @@ export default function LiveDashboard() {
           personAPI.stats(),
           systemAPI.status(),
         ])
-        setStats(statsRes.data)
-        setSystemStatus(statusRes.data)
-      } catch (_) {}
+        setStats(statsRes.data || {})
+        setSystemStatus(statusRes.data || {})
+      } catch (_) {
+        // Backend unavailable — keep default empty state
+      }
     }
     load()
     const t = setInterval(load, 5000)
