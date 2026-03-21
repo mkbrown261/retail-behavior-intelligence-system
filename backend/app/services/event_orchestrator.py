@@ -46,6 +46,16 @@ async def handle_detection(detection: Dict):
 
 
 async def _process_detection(db: AsyncSession, detection: Dict):
+    # Guard: only process dicts that contain the required detection fields.
+    # Raw camera frames (FRAME_READY intent payloads) do NOT have these fields
+    # and must never reach this function.
+    if "session_id" not in detection or "event_type" not in detection:
+        logger.debug(
+            f"_process_detection: skipped non-detection payload "
+            f"(keys={list(detection.keys())[:6]})"
+        )
+        return
+
     session_id = detection["session_id"]
     event_type = detection["event_type"]
     camera_id  = detection.get("camera_id", 0)

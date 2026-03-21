@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'rbis-backend',
       script: 'uvicorn',
-      args: 'app.main:app --host 0.0.0.0 --port 8000 --log-level info',
+      args: 'app.main:app --host 0.0.0.0 --port 8000 --log-level info --no-server-header',
       cwd: '/home/user/webapp/backend',
       interpreter: 'none',
       env: { PYTHONPATH: '/home/user/webapp/backend' },

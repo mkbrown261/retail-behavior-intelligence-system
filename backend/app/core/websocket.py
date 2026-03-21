@@ -1,8 +1,10 @@
 import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, Set, Callable, Any
+from typing import Dict, Set, Any
 import json
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -14,24 +16,40 @@ class ConnectionManager:
         self.active_connections: Dict[str, Any] = {}
         self.subscriptions: Dict[str, Set[str]] = {
             "detections": set(),
-            "alerts": set(),
-            "scores": set(),
-            "events": set(),
-            "heatmap": set(),
-            "cameras": set(),
+            "alerts":     set(),
+            "scores":     set(),
+            "events":     set(),
+            "heatmap":    set(),
+            "cameras":    set(),
         }
         self._lock = asyncio.Lock()
 
-    async def connect(self, websocket, client_id: str):
-        await websocket.accept()
+    async def connect(self, websocket, client_id: str) -> bool:
+        """
+        Accept a WebSocket connection.
+        Returns False (and closes the socket) if the connection limit is reached.
+        """
         async with self._lock:
+            if len(self.active_connections) >= settings.WS_MAX_CONNECTIONS:
+                logger.warning(
+                    f"WebSocket connection rejected — limit reached "
+                    f"({settings.WS_MAX_CONNECTIONS}): {client_id}"
+                )
+                await websocket.close(code=1008, reason="Server at capacity")
+                return False
+            await websocket.accept()
             self.active_connections[client_id] = websocket
-        logger.info(f"WebSocket connected: {client_id} | Total: {len(self.active_connections)}")
+
+        logger.info(
+            f"WebSocket connected: {client_id} | "
+            f"Total: {len(self.active_connections)}"
+        )
         await self.send_personal(client_id, {
-            "type": "connected",
-            "client_id": client_id,
-            "timestamp": datetime.utcnow().isoformat()
+            "type":       "connected",
+            "client_id":  client_id,
+            "timestamp":  datetime.utcnow().isoformat(),
         })
+        return True
 
     async def disconnect(self, client_id: str):
         async with self._lock:
@@ -41,9 +59,11 @@ class ConnectionManager:
         logger.info(f"WebSocket disconnected: {client_id}")
 
     async def subscribe(self, client_id: str, topics: list):
+        # Only allow known topics — silently ignore unknown ones
+        valid = set(self.subscriptions.keys())
         async with self._lock:
             for topic in topics:
-                if topic in self.subscriptions:
+                if topic in valid:
                     self.subscriptions[topic].add(client_id)
 
     async def send_personal(self, client_id: str, data: dict):

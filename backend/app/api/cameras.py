@@ -15,7 +15,8 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+import re
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.websocket import manager as ws_manager
 from app.services.video_pipeline import pipeline
@@ -144,16 +145,39 @@ async def get_camera(camera_id: str):
     return info
 
 
+# Valid camera types
+_VALID_CAM_TYPES = {"USB", "RTSP", "HTTP", "ONVIF", "FILE", "MOCK"}
+# camera_id: alphanumeric + underscore + hyphen only, max 64 chars
+_CAMERA_ID_RE = re.compile(r'^[a-zA-Z0-9_\-]{1,64}$')
+
+
 class AddCameraRequest(BaseModel):
-    camera_id: str   = Field(..., description="Unique camera identifier")
+    camera_id: str   = Field(..., description="Unique camera identifier (alphanumeric, _, -)")
     cam_type:  str   = Field("MOCK", description="USB | RTSP | HTTP | ONVIF | FILE | MOCK")
     source:    Any   = Field(..., description="Device index (USB) or stream URL")
     width:     int   = Field(1280,  ge=160, le=3840)
     height:    int   = Field(720,   ge=120, le=2160)
-    fps:       float = Field(15.0,  ge=1,   le=120)
-    username:  str   = Field("",    description="Credentials (optional)")
-    password:  str   = Field("",    description="Credentials (optional)")
+    fps:       float = Field(15.0,  ge=1,   le=30)
+    username:  str   = Field("",    max_length=128)
+    password:  str   = Field("",    max_length=128)
     extra:     Dict  = Field(default_factory=dict)
+
+    @field_validator("camera_id")
+    @classmethod
+    def validate_camera_id(cls, v: str) -> str:
+        if not _CAMERA_ID_RE.match(v):
+            raise ValueError(
+                "camera_id must be 1-64 chars: letters, digits, underscores, hyphens only"
+            )
+        return v
+
+    @field_validator("cam_type")
+    @classmethod
+    def validate_cam_type(cls, v: str) -> str:
+        upper = v.upper()
+        if upper not in _VALID_CAM_TYPES:
+            raise ValueError(f"cam_type must be one of: {', '.join(sorted(_VALID_CAM_TYPES))}")
+        return upper
 
 
 @router.post("/cameras")
@@ -201,11 +225,19 @@ async def restart_camera(camera_id: str):
 # ONVIF auto-discovery
 # ═══════════════════════════════════════════════════════════════════════════════
 
+class OnvifDiscoverRequest(BaseModel):
+    """Credentials passed in request body — never in query parameters."""
+    username: str = Field("", max_length=128, description="ONVIF device username")
+    password: str = Field("", max_length=128, description="ONVIF device password")
+
+
 @router.post("/cameras/discover/onvif")
-async def discover_onvif(username: str = "", password: str = ""):
-    """Run ONVIF WS-Discovery on the local network."""
+async def discover_onvif(req: OnvifDiscoverRequest):
+    """Run ONVIF WS-Discovery on the local network.
+    Credentials are passed in the JSON body, never in query parameters.
+    """
     try:
-        added = await _cam().discover_onvif(username=username, password=password)
+        added = await _cam().discover_onvif(username=req.username, password=req.password)
         return {"discovered": len(added), "cameras": added}
     except Exception as exc:
         logger.error(f"ONVIF discovery error: {exc}", exc_info=True)

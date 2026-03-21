@@ -217,10 +217,16 @@ class CameraStream:
     def info(self) -> Dict:
         cap_w = self.cfg.width
         cap_h = self.cfg.height
+        # Build a safe source URL — strip credentials before returning
+        source_display = str(self.cfg.source)
+        if self.cfg.username and "://" in source_display:
+            # Remove embedded credentials from the returned URL
+            import re
+            source_display = re.sub(r'://[^@]+@', '://', source_display)
         return {
             "camera_id":        self.id,
             "cam_type":         self.cfg.cam_type.value,
-            "source":           str(self.cfg.source),
+            "source":           source_display,   # credentials stripped
             "status":           self.status.value,
             "resolution":       [cap_w, cap_h],
             "fps_target":       self.cfg.fps,
@@ -232,6 +238,7 @@ class CameraStream:
             "last_frame_ts":    self._last_frame_ts,
             "has_frame":        self.latest_frame is not None,
             "extra":            self.cfg.extra,
+            # NOTE: username and password are NEVER returned in API responses
         }
 
     # ── Capture loop ──────────────────────────────────────────────────────────

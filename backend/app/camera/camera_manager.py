@@ -39,9 +39,11 @@ logger = logging.getLogger(__name__)
 
 # ── Default config paths (searched in order) ─────────────────────────────────
 
+# Search relative to the file's location first, then CWD
+_HERE = Path(__file__).parent.parent.parent  # backend/
 _CONFIG_SEARCH_PATHS = [
-    Path("/home/user/webapp/backend/cameras.yaml"),
-    Path("/home/user/webapp/backend/cameras.json"),
+    _HERE / "cameras.yaml",
+    _HERE / "cameras.json",
     Path("cameras.yaml"),
     Path("cameras.json"),
 ]
@@ -180,6 +182,7 @@ class CameraManager:
             "width":     stream.cfg.width,
             "height":    stream.cfg.height,
             "fps":       stream.cfg.fps,
+            # credentials kept internal — not exposed to API layer
             "username":  stream.cfg.username,
             "password":  stream.cfg.password,
             "extra":     stream.cfg.extra,
