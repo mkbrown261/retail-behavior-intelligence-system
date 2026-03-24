@@ -4,16 +4,18 @@ import LiveDashboard from './pages/LiveDashboard'
 import AnalyticsDashboard from './pages/AnalyticsDashboard'
 import PersonsPage from './pages/PersonsPage'
 import CamerasPage from './pages/CamerasPage'
+import SetupGuidePage from './pages/SetupGuidePage'
 import ErrorBoundary from './components/ErrorBoundary'
 import {
-  Monitor, BarChart2, Users, Shield, Eye, AlertTriangle, Camera
+  Monitor, BarChart2, Users, Shield, Eye, AlertTriangle, Camera, BookOpen
 } from 'lucide-react'
 
 const NAV = [
-  { to: '/',          label: 'Live',       icon: Monitor  },
+  { to: '/',          label: 'Live',       icon: Monitor   },
   { to: '/analytics', label: 'Analytics',  icon: BarChart2 },
-  { to: '/persons',   label: 'Persons',    icon: Users    },
-  { to: '/cameras',   label: 'Cameras',    icon: Camera   },
+  { to: '/persons',   label: 'Persons',    icon: Users     },
+  { to: '/cameras',   label: 'Cameras',    icon: Camera    },
+  { to: '/setup',     label: 'Setup',      icon: BookOpen  },
 ]
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
@@ -101,6 +103,7 @@ export default function App() {
             <Route path="/analytics" element={<AnalyticsDashboard />} />
             <Route path="/persons"   element={<PersonsPage />} />
             <Route path="/cameras"   element={<CamerasPage />} />
+            <Route path="/setup"     element={<SetupGuidePage />} />
           </Routes>
         </ErrorBoundary>
       </main>
