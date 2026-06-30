@@ -472,6 +472,10 @@ class YOLOInferenceEngine:
                 logger.error(f"Failed to load YOLO model: {e}", exc_info=True)
                 return False
 
+    # ── Detection counter for diagnostics ────────────────────────────────────
+    _total_inferences: int = 0
+    _total_persons_detected: int = 0
+
     @classmethod
     def detect(cls, frame: np.ndarray) -> List[Tuple[List[float], float]]:
         """
@@ -480,6 +484,13 @@ class YOLOInferenceEngine:
         bbox coords are normalized to [0,1] relative to frame size.
         """
         if cls._model is None:
+            # Log once so the user knows why nothing is happening
+            if cls._total_inferences == 0:
+                logger.error(
+                    "🚨 YOLO model is None — detect() returning empty. "
+                    "Model failed to load at startup. Check logs for download errors."
+                )
+            cls._total_inferences += 1
             return []
 
         h, w = frame.shape[:2]
@@ -503,6 +514,23 @@ class YOLOInferenceEngine:
                         round(x2 / w, 4), round(y2 / h, 4),
                     ]
                     detections.append((bbox_norm, conf))
+
+            cls._total_inferences += 1
+            cls._total_persons_detected += len(detections)
+
+            # Log every 30 inferences so the user can see YOLO is working
+            if cls._total_inferences % 30 == 0:
+                logger.info(
+                    f"🤖 YOLO stats: {cls._total_inferences} inferences, "
+                    f"{cls._total_persons_detected} total person detections "
+                    f"(current frame: {len(detections)} person(s))"
+                )
+            elif detections:
+                logger.debug(
+                    f"🎯 YOLO detected {len(detections)} person(s) "
+                    f"[confs: {[round(d[1],2) for d in detections]}]"
+                )
+
             return detections
         except Exception as e:
             logger.error(f"YOLO inference error: {e}")
@@ -530,6 +558,14 @@ class CameraAIProcessor:
     async def on_frame(self, frame: np.ndarray):
         """Called for every frame from CameraStream. Skips frames per config."""
         self._frame_count += 1
+
+        # Log the first frame received so we know the pipeline is wired
+        if self._frame_count == 1:
+            logger.info(
+                f"✅ [{self.camera_id}] First frame received by AI processor "
+                f"(shape={frame.shape}) — YOLO detection starting"
+            )
+
         if self._frame_count % self._process_every != 0:
             return
 
@@ -537,7 +573,20 @@ class CameraAIProcessor:
         detections = YOLOInferenceEngine.detect(frame)
         events     = self._tracker.update(detections, frame, w, h)
 
+        # Periodic heartbeat so the user knows frames are being processed
+        processed_count = self._frame_count // self._process_every
+        if processed_count % 50 == 0:
+            logger.info(
+                f"📷 [{self.camera_id}] Processed {processed_count} frames, "
+                f"{self._tracker.active_count()} active person(s), "
+                f"{len(detections)} detection(s) this frame"
+            )
+
         for evt in events:
+            logger.info(
+                f"🚨 [{self.camera_id}] EVENT → {evt.get('event_type')} "
+                f"session={evt.get('session_id')} zone={evt.get('zone')}"
+            )
             try:
                 await self._callback(evt)
             except Exception as e:

@@ -71,11 +71,96 @@ async def websocket_anon(websocket: WebSocket):
 
 @router.get("/ws/status")
 async def ws_status():
+    from app.core.config import settings
+    from app.camera.camera_manager import camera_manager
+    from app.services.ai_inference import is_model_loaded, get_active_person_count
+    ai_running = settings.AI_ENABLED and camera_manager.get_camera_count() > 0
     return {
         "connected_clients": ws_manager.connection_count,
-        "pipeline_active":   pipeline._running,
-        "active_persons":    pipeline.get_active_count(),
+        "pipeline_active":   pipeline._running or ai_running,
+        "active_persons":    get_active_person_count() if ai_running else pipeline.get_active_count(),
+        "ai_enabled":        settings.AI_ENABLED,
+        "ai_model_loaded":   is_model_loaded(),
+        "camera_count":      camera_manager.get_camera_count(),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AI Debug endpoint — diagnose YOLO / camera chain in real-time
+# GET /api/debug/ai
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/debug/ai")
+async def debug_ai():
+    """
+    Real-time diagnostic for the AI detection chain.
+    Shows: YOLO model status, active cameras, frame counts, processor states.
+    Use this to confirm detections are flowing from camera → YOLO → alerts.
+    """
+    from app.core.config import settings
+    from app.camera.camera_manager import camera_manager
+    from app.services.ai_inference import (
+        YOLOInferenceEngine, _processors, is_model_loaded, get_active_person_count
+    )
+
+    cam_infos = camera_manager.get_all_info()
+    processors_info = {}
+    for cam_id, proc in _processors.items():
+        processors_info[cam_id] = {
+            "frames_received": proc._frame_count,
+            "frames_processed": proc._frame_count // proc._process_every,
+            "process_every_n": proc._process_every,
+            "active_persons": proc.active_persons(),
+            "tracker_tracks": len(proc._tracker._tracks),
+        }
+
+    return {
+        "ai_enabled":       settings.AI_ENABLED,
+        "yolo_model_loaded": is_model_loaded(),
+        "yolo_model_path":  YOLOInferenceEngine._model_path,
+        "camera_count":     camera_manager.get_camera_count(),
+        "cameras": [
+            {
+                "camera_id": c["camera_id"],
+                "status":    c["status"],
+                "has_frame": c["has_frame"],
+                "fps_actual": c["fps_actual"],
+                "frames_total": c["frames_total"],
+                "cam_type":  c["cam_type"],
+            }
+            for c in cam_infos
+        ],
+        "ai_processors":    processors_info,
+        "active_persons_ai": get_active_person_count(),
+        "pipeline_sim_running": pipeline._running,
+        "diagnosis": _build_diagnosis(settings, is_model_loaded(), cam_infos, processors_info),
+    }
+
+
+def _build_diagnosis(settings, model_loaded: bool, cam_infos: list, processors: dict) -> list:
+    """Return human-readable list of what's wrong (empty = all good)."""
+    issues = []
+    if not settings.AI_ENABLED:
+        issues.append("❌ AI_ENABLED=false in .env — set AI_ENABLED=true and restart")
+    if not model_loaded:
+        issues.append("❌ YOLO model NOT loaded — check startup logs for download errors")
+    if not cam_infos:
+        issues.append("❌ No cameras registered — check cameras.yaml exists and is valid")
+    for c in cam_infos:
+        if c["status"] in ("CONNECTING", "RECONNECTING", "ERROR"):
+            issues.append(f"⚠️  Camera '{c['camera_id']}' status={c['status']} — webcam may be in use by another app")
+        if c["status"] == "CONNECTED" and not c["has_frame"]:
+            issues.append(f"⚠️  Camera '{c['camera_id']}' connected but no frames yet")
+    if not processors and cam_infos:
+        issues.append("❌ No AI processors created yet — frame callback may not be wired. Restart backend.")
+    for cam_id, p in processors.items():
+        if p["frames_received"] == 0:
+            issues.append(f"❌ Processor for '{cam_id}' received 0 frames — FRAME_READY intent not firing")
+        elif p["frames_processed"] == 0:
+            issues.append(f"⚠️  Processor for '{cam_id}' got frames but processed 0 (frame skip bug)")
+    if not issues:
+        issues.append("✅ All systems nominal — detections should be flowing")
+    return issues
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

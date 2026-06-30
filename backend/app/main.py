@@ -82,6 +82,9 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("✅ System ready — AI=true, using real camera feeds")
 
+    # ── Startup diagnostic summary ────────────────────────────────────────────
+    _print_startup_summary()
+
     # Schedule daily report job
     _schedule_reports()
     yield
@@ -93,6 +96,35 @@ async def lifespan(app: FastAPI):
     logger.info("👋 RBIS shutdown complete")
 
 
+def _print_startup_summary():
+    """Print a clear startup diagnostic so the user knows exactly what's running."""
+    from app.services.ai_inference import is_model_loaded, YOLOInferenceEngine
+    cam_count = camera_manager.get_camera_count()
+    cam_infos = camera_manager.get_all_info()
+
+    logger.info("=" * 60)
+    logger.info("🔍 RBIS STARTUP DIAGNOSTIC")
+    logger.info(f"  AI_ENABLED:       {settings.AI_ENABLED}")
+    logger.info(f"  YOLO loaded:      {is_model_loaded()}")
+    logger.info(f"  YOLO model path:  {YOLOInferenceEngine._model_path}")
+    logger.info(f"  Cameras started:  {cam_count}")
+    for c in cam_infos:
+        logger.info(
+            f"    [{c['camera_id']}] type={c['cam_type']} "
+            f"status={c['status']} source={c.get('source','?')}"
+        )
+    if not cam_infos:
+        logger.error("  ❌ NO CAMERAS — check cameras.yaml!")
+    if not is_model_loaded() and settings.AI_ENABLED:
+        logger.error("  ❌ YOLO NOT LOADED — detections will NOT fire!")
+        logger.error("     Fix: run:  python3 -c \"from ultralytics import YOLO; YOLO('yolov8n.pt')\"")
+    logger.info(f"  Pipeline mode:    {'AI/real camera' if settings.AI_ENABLED else 'SIMULATION'}")
+    logger.info(f"  Sim running:      {pipeline._running}")
+    logger.info("=" * 60)
+    logger.info("📡 Debug endpoint: GET /api/debug/ai  (shows live YOLO + frame stats)")
+    logger.info("=" * 60)
+
+
 def _wire_ai_to_camera_manager():
     """
     Register an async frame callback on CameraManager so every FRAME_READY
@@ -100,6 +132,8 @@ def _wire_ai_to_camera_manager():
     → handle_detection → scoring / alerts / WebSocket.
     """
     from app.services.ai_inference import get_or_create_processor
+
+    _callback_fire_count = {"n": 0}
 
     async def _ai_frame_callback(frame_payload: dict):
         """
@@ -109,12 +143,24 @@ def _wire_ai_to_camera_manager():
         camera_id = frame_payload.get("camera_id", "unknown")
         frame     = frame_payload.get("frame")
         if frame is None:
+            logger.warning(f"[{camera_id}] _ai_frame_callback: frame is None in payload!")
             return
+
+        _callback_fire_count["n"] += 1
+        n = _callback_fire_count["n"]
+
+        # Log the first 3 frames so we know data is flowing
+        if n <= 3:
+            logger.info(
+                f"📡 AI frame callback firing (#{n}): camera={camera_id} "
+                f"frame_shape={frame.shape if hasattr(frame, 'shape') else 'unknown'}"
+            )
+
         processor = get_or_create_processor(camera_id, handle_detection)
         await processor.on_frame(frame)
 
     camera_manager.register_frame_callback(_ai_frame_callback)
-    logger.info("AI frame callback registered on CameraManager")
+    logger.info("✅ AI frame callback registered on CameraManager — frames will flow to YOLO")
 
 
 def _schedule_reports():
@@ -250,10 +296,11 @@ async def global_exception_handler(request: Request, exc: Exception):
 # ── Health check ───────────────────────────────────────────────────────────────
 @app.get("/api/health")
 async def health():
+    ai_running = settings.AI_ENABLED and camera_manager.get_camera_count() > 0
     return {
         "status": "ok",
         "version": settings.APP_VERSION,
-        "pipeline_running": pipeline._running,
+        "pipeline_running": pipeline._running or ai_running,
         "active_persons":   pipeline.get_active_count(),
     }
 
@@ -262,11 +309,16 @@ async def health():
 async def system_status():
     from app.core.websocket import manager
     from app.services.scoring import get_all_live_scores
+    from app.services.ai_inference import get_active_person_count, is_model_loaded
+    ai_running = settings.AI_ENABLED and camera_manager.get_camera_count() > 0
+    active = get_active_person_count() if ai_running else pipeline.get_active_count()
     return {
-        "pipeline_running":  pipeline._running,
-        "active_persons":    pipeline.get_active_count(),
+        "pipeline_running":  pipeline._running or ai_running,
+        "active_persons":    active,
         "connected_clients": manager.connection_count,
         "live_scores":       get_all_live_scores(),
+        "ai_enabled":        settings.AI_ENABLED,
+        "ai_model_loaded":   is_model_loaded(),
         "cameras": {
             "total":   camera_manager.get_camera_count(),
             "streams": [c["camera_id"] for c in camera_manager.get_all_info()],
