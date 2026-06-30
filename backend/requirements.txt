@@ -43,8 +43,11 @@ jinja2==3.1.6
 apscheduler==3.11.0
 
 # ── Storage (S3 optional) ─────────────────────────────────────────────────────
-boto3==1.38.12
-aioboto3==13.3.0
+# boto3 and aioboto3 are only needed if you use S3 for snapshot/clip storage.
+# They are commented out by default because their botocore versions conflict.
+# Uncomment both together when needed (they must be version-matched):
+# boto3==1.35.81
+# aioboto3==13.3.0
 
 # ── Camera / ONVIF (optional) ─────────────────────────────────────────────────
 # onvif-zeep==0.2.12   # uncomment if using ONVIF cameras
