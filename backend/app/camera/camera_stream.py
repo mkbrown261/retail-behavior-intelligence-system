@@ -223,6 +223,17 @@ class CameraStream:
             # Remove embedded credentials from the returned URL
             import re
             source_display = re.sub(r'://[^@]+@', '://', source_display)
+        # Hold the lock while reading frame-related state to avoid
+        # a race with the capture thread on macOS/ARM where writes
+        # to composite objects are not guaranteed atomic.
+        with self._lock:
+            has_frame     = self.latest_frame is not None
+            fps_actual    = round(self._fps_actual, 1)
+            frames_total  = self._frames_total
+            frames_drop   = self._frames_dropped
+            errors_total  = self._errors_total
+            reconnects    = self._reconnect_count
+            last_frame_ts = self._last_frame_ts
         return {
             "camera_id":        self.id,
             "cam_type":         self.cfg.cam_type.value,
@@ -230,13 +241,13 @@ class CameraStream:
             "status":           self.status.value,
             "resolution":       [cap_w, cap_h],
             "fps_target":       self.cfg.fps,
-            "fps_actual":       round(self._fps_actual, 1),
-            "frames_total":     self._frames_total,
-            "frames_dropped":   self._frames_dropped,
-            "errors_total":     self._errors_total,
-            "reconnect_count":  self._reconnect_count,
-            "last_frame_ts":    self._last_frame_ts,
-            "has_frame":        self.latest_frame is not None,
+            "fps_actual":       fps_actual,
+            "frames_total":     frames_total,
+            "frames_dropped":   frames_drop,
+            "errors_total":     errors_total,
+            "reconnect_count":  reconnects,
+            "last_frame_ts":    last_frame_ts,
+            "has_frame":        has_frame,
             "extra":            self.cfg.extra,
             # NOTE: username and password are NEVER returned in API responses
         }

@@ -57,3 +57,69 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database initialized successfully")
+    # Run lightweight schema migrations to handle column type changes
+    # that create_all() won't apply to existing tables.
+    await _migrate_schema()
+
+
+async def _migrate_schema():
+    """
+    Apply incremental schema fixes to existing databases.
+    Safe to call on every startup — each migration is idempotent.
+    """
+    if not settings.is_sqlite:
+        # PostgreSQL: use Alembic for migrations — skip this helper.
+        return
+
+    from sqlalchemy import text
+
+    migrations = [
+        # Sprint-2: camera_id columns changed from INTEGER to TEXT.
+        # SQLite can't ALTER COLUMN type, so we recreate affected tables
+        # only if they still have the old INTEGER type.
+        ("suspicion_scores", "camera_id"),
+        ("alerts",           "camera_id"),
+        ("heatmap_points",   "camera_id"),
+        ("events",           "camera_id"),
+    ]
+
+    async with engine.begin() as conn:
+        for table, col in migrations:
+            # PRAGMA table_info returns: cid, name, type, notnull, dflt, pk
+            rows = (await conn.execute(text(f"PRAGMA table_info({table})"))).fetchall()
+            col_info = next((r for r in rows if r[1] == col), None)
+            if col_info is None:
+                continue  # column doesn't exist yet — create_all handles it
+            if col_info[2].upper() in ("TEXT", "VARCHAR", "STRING"):
+                continue  # already correct type
+
+            # Column is INTEGER — need to migrate.
+            # SQLite migration recipe: rename → recreate → copy → drop old.
+            logger.info(f"DB migration: converting {table}.{col} INTEGER → TEXT")
+            try:
+                # Get current CREATE TABLE statement to rebuild without INTEGER
+                row = (await conn.execute(
+                    text(f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{table}'")
+                )).fetchone()
+                if row is None:
+                    continue
+                old_sql: str = row[0]
+                # Replace the column type in the CREATE statement
+                new_sql = old_sql.replace(
+                    f"{col} INTEGER", f"{col} TEXT"
+                ).replace(
+                    f'"{col}" INTEGER', f'"{col}" TEXT'
+                )
+                cols_row = (await conn.execute(text(f"PRAGMA table_info({table})"))).fetchall()
+                col_names = ", ".join(f'"{r[1]}"' for r in cols_row)
+
+                await conn.execute(text(f"ALTER TABLE {table} RENAME TO {table}_old"))
+                await conn.execute(text(new_sql))
+                await conn.execute(text(
+                    f"INSERT INTO {table} ({col_names}) "
+                    f"SELECT {col_names} FROM {table}_old"
+                ))
+                await conn.execute(text(f"DROP TABLE {table}_old"))
+                logger.info(f"DB migration: {table}.{col} migration complete")
+            except Exception as exc:
+                logger.error(f"DB migration failed for {table}.{col}: {exc}", exc_info=True)

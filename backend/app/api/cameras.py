@@ -123,9 +123,15 @@ async def single_camera_feed_legacy(camera_id: int):
 @router.get("/cameras")
 async def list_cameras():
     """List all registered camera streams and their current status."""
+    try:
+        cameras = _cam().get_all_info()
+        total   = _cam().get_camera_count()
+    except Exception as exc:
+        logger.error(f"list_cameras error: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve camera list: {exc}")
     return {
-        "cameras": _cam().get_all_info(),
-        "total":   _cam().get_camera_count(),
+        "cameras": cameras,
+        "total":   total,
     }
 
 

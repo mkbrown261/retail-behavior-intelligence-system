@@ -164,6 +164,13 @@ class CameraManager:
                 return False
 
         await self._stop_stream(camera_id, reason="removed by user")
+        # Clean up the AI processor for this camera so its track/state
+        # history doesn't accumulate indefinitely if the camera is re-added.
+        try:
+            from app.services.ai_inference import remove_processor
+            remove_processor(camera_id)
+        except Exception:
+            pass
         self._emit_list_changed()
         logger.info(f"CameraManager: removed camera '{camera_id}'")
         return True

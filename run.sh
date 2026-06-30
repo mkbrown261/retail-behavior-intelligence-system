@@ -73,4 +73,4 @@ cd "$BACKEND"
 DATABASE_URL="sqlite+aiosqlite:///$SCRIPT_DIR/data/rbis.db" \
 LOCAL_STORAGE_PATH="$SCRIPT_DIR/data" \
 PORT="$PORT" \
-uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --reload
+uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --workers 1 --no-access-log
