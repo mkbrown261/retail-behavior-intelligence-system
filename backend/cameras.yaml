@@ -28,13 +28,16 @@ cameras:
     height:    720
     fps:       10
 
-  # ── USB webcam examples (comment out if no camera attached) ───────────────
-  # - camera_id: usb_cam_0
-  #   cam_type:  USB
-  #   source:    0           # device index (integer)
-  #   width:     1280
-  #   height:    720
-  #   fps:       30
+  # ── USB webcam (laptop webcam / USB camera) ───────────────────────────────
+  # Uncomment the block below to use your laptop webcam or any USB camera.
+  # source: 0 = first USB/built-in camera, source: 1 = second camera, etc.
+  # On Linux: verify device with `ls /dev/video*` and test with `ffplay /dev/video0`
+  - camera_id: usb_cam_0
+    cam_type:  USB
+    source:    0           # device index — 0 = first camera (laptop webcam)
+    width:     1280
+    height:    720
+    fps:       30
 
   # - camera_id: usb_cam_1
   #   cam_type:  USB

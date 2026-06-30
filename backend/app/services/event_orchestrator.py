@@ -109,10 +109,16 @@ async def _process_detection(db: AsyncSession, detection: Dict):
 
     # ── 5. Handle alerts ──────────────────────────────────────────────────────
     alert_payload = None
+    current_score = score_result.get("score", 0)
+
+    # BYPASS_REGISTER and EXIT_AFTER_PICK are always high-priority — alert regardless
+    # of current score (a quick grab-and-run may not have built up score yet).
+    # EXIT_STORE only alerts when suspicion is genuinely HIGH (score >= 61).
+    # crossed_threshold fires the first time a person hits HIGH_SUSPICION on ANY event.
     should_alert = (
         score_result.get("crossed_threshold")
-        or event_type in ("BYPASS_REGISTER", "EXIT_AFTER_PICK", "EXIT_STORE")
-        and score_result.get("score", 0) >= 61
+        or event_type in ("BYPASS_REGISTER", "EXIT_AFTER_PICK")
+        or (event_type == "EXIT_STORE" and current_score >= 61)
     )
     if should_alert:
         snap_path = await save_snapshot(None, session_id, camera_id, event_type)
@@ -236,4 +242,48 @@ async def _log_event(
         person.is_active = False
         person.exit_time = datetime.now(timezone.utc)
 
+        # ── Record completed visit in repeat-visitor cluster ─────────────────
+        if person.appearance_cluster_id:
+            # SQLite server_default=func.now() returns naive datetimes; normalise
+            # both sides to UTC-aware so subtraction never raises TypeError.
+            def _to_utc(dt):
+                if dt is None:
+                    return None
+                if dt.tzinfo is None:
+                    return dt.replace(tzinfo=timezone.utc)
+                return dt
+
+            entry = _to_utc(person.entry_time)
+            exit_ = _to_utc(person.exit_time) or datetime.now(timezone.utc)
+            dwell_minutes = (exit_ - entry).total_seconds() / 60.0 if entry else 0.0
+            had_incident = person.is_flagged
+
+            # Run in background so we don't block _log_event's caller
+            import asyncio
+            asyncio.create_task(
+                _update_cluster_on_exit(
+                    person.appearance_cluster_id,
+                    person.current_suspicion_score or 0.0,
+                    dwell_minutes,
+                    had_incident,
+                )
+            )
+
     return evt
+
+
+async def _update_cluster_on_exit(
+    cluster_id: str,
+    suspicion_score: float,
+    dwell_minutes: float,
+    had_incident: bool,
+):
+    """
+    Update repeat-visitor cluster stats when a person exits the store.
+    Runs as a background task so it never blocks the main detection path.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            await record_visit(db, cluster_id, suspicion_score, dwell_minutes, had_incident)
+    except Exception as e:
+        logger.error(f"_update_cluster_on_exit error for {cluster_id}: {e}", exc_info=True)

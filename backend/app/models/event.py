@@ -61,7 +61,7 @@ class Event(Base):
             "position_y": self.position_y,
             "zone": self.zone,
             "duration_seconds": self.duration_seconds,
-            "metadata": self.metadata,
+            "metadata": self.extra_data,
             "snapshot_path": self.snapshot_path,
             "is_suspicious": self.is_suspicious,
         }

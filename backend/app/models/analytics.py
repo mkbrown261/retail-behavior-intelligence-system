@@ -62,6 +62,7 @@ class Alert(Base):
 
     id = Column(String, primary_key=True, default=gen_uuid)
     person_id = Column(String, ForeignKey("persons.id"), nullable=True, index=True)
+    session_id = Column(String, nullable=True, index=True)   # e.g. "Person_012" — human-readable
 
     alert_type = Column(String, nullable=False)       # SUSPICION_HIGH | BYPASS_REGISTER | etc
     severity = Column(String, nullable=False)         # LOW | MEDIUM | HIGH | CRITICAL
@@ -90,6 +91,7 @@ class Alert(Base):
         return {
             "id": self.id,
             "person_id": self.person_id,
+            "session_id": self.session_id,
             "alert_type": self.alert_type,
             "severity": self.severity,
             "suspicion_score": self.suspicion_score,

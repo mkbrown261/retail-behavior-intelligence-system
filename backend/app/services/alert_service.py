@@ -46,6 +46,7 @@ async def create_alert(
 
     alert = Alert(
         person_id=person_id,
+        session_id=session_id,
         alert_type=trigger_event,
         severity=severity,
         suspicion_score=suspicion_score,
@@ -102,7 +103,12 @@ async def get_recent_alerts(
 
 
 async def acknowledge_alert(db: AsyncSession, alert_id: str, acknowledged_by: str = "system") -> bool:
-    result = await db.execute(
+    # Use a SELECT first to confirm the alert exists (RETURNING is not
+    # supported by aiosqlite's ChunkedIteratorResult).
+    check = await db.execute(select(Alert).where(Alert.id == alert_id))
+    if check.scalar_one_or_none() is None:
+        return False
+    await db.execute(
         update(Alert)
         .where(Alert.id == alert_id)
         .values(
@@ -110,10 +116,9 @@ async def acknowledge_alert(db: AsyncSession, alert_id: str, acknowledged_by: st
             acknowledged_by=acknowledged_by,
             acknowledged_at=datetime.now(timezone.utc),
         )
-        .returning(Alert.id)
     )
     await db.commit()
-    return result.rowcount > 0
+    return True
 
 
 async def get_alert_stats(db: AsyncSession) -> dict:
