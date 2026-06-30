@@ -26,28 +26,46 @@ def _timestamp_str() -> str:
 async def save_snapshot(
     image_bytes: Optional[bytes],
     session_id: str,
-    camera_id: int,
+    camera_id: str,
     event_type: str = "SNAPSHOT",
+    *,
+    try_live_camera: bool = True,
 ) -> str:
-    """Save a JPEG snapshot and return its relative path."""
+    """
+    Save a JPEG snapshot and return its relative path.
+
+    Priority (Task 2.5):
+      1. Caller-supplied image_bytes (real JPEG from a live frame)
+      2. Pull latest JPEG from camera_manager if try_live_camera=True
+      3. Fall back to placeholder text (simulation / offline camera)
+    """
     filename = f"{session_id}_cam{camera_id}_{event_type}_{_timestamp_str()}_{uuid.uuid4().hex[:6]}.jpg"
     filepath = os.path.join(SNAPSHOT_DIR, filename)
+
+    if not image_bytes and try_live_camera:
+        # Task 2.5: grab the current frame from the live camera stream
+        try:
+            from app.camera.camera_manager import camera_manager
+            image_bytes = camera_manager.get_jpeg(str(camera_id), quality=85)
+        except Exception as exc:
+            logger.debug(f"save_snapshot: could not pull live frame ({exc})")
 
     if image_bytes:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, _write_file, filepath, image_bytes)
+        logger.debug(f"Snapshot saved (JPEG, {len(image_bytes)} bytes): {filepath}")
     else:
-        # Write a placeholder text file as simulated snapshot
+        # Simulation fallback — write a placeholder text file
         await _write_placeholder(filepath, session_id, camera_id, event_type)
+        logger.debug(f"Snapshot placeholder saved: {filepath}")
 
-    logger.debug(f"Snapshot saved: {filepath}")
     return os.path.join("snapshots", filename)
 
 
 async def save_clip(
     video_bytes: Optional[bytes],
     session_id: str,
-    camera_id: int,
+    camera_id: str,
     duration: float = 20.0,
 ) -> str:
     """Save a video clip and return its relative path."""
@@ -69,7 +87,7 @@ def _write_file(path: str, data: bytes):
         f.write(data)
 
 
-async def _write_placeholder(filepath: str, session_id: str, camera_id: int, label: str):
+async def _write_placeholder(filepath: str, session_id: str, camera_id: str, label: str):
     content = (
         f"SIMULATED {label}\n"
         f"Session: {session_id}\n"

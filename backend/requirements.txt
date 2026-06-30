@@ -15,6 +15,7 @@ aiosqlite==0.21.0
 # ── Auth / security ───────────────────────────────────────────────────────────
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+bcrypt==4.3.0          # passlib 1.7.4 is incompatible with bcrypt>=5; pin to 4.x
 python-dotenv==1.1.0
 
 # ── Data validation ───────────────────────────────────────────────────────────

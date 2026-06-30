@@ -13,7 +13,7 @@ class HeatmapPoint(Base):
 
     id = Column(String, primary_key=True, default=gen_uuid)
     person_id = Column(String, ForeignKey("persons.id"), nullable=True)
-    camera_id = Column(Integer, nullable=False)
+    camera_id = Column(String, nullable=False)   # Task 2.4: string camera ID
 
     # Grid cell (normalized 0–1 mapped to store grid)
     grid_x = Column(Integer, nullable=False)
@@ -71,7 +71,7 @@ class Alert(Base):
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)
 
-    camera_id = Column(Integer, nullable=True)
+    camera_id = Column(String, nullable=True)   # Task 2.4: string camera ID
     snapshot_path = Column(String, nullable=True)
     clip_path = Column(String, nullable=True)
 

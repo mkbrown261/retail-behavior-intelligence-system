@@ -22,6 +22,7 @@ from app.services.video_pipeline import pipeline
 from app.services.event_orchestrator import handle_detection
 from app.camera.camera_manager import camera_manager
 from app.api import persons, alerts, analytics, cameras, events
+from app.api import auth
 
 
 logging.basicConfig(
@@ -47,27 +48,71 @@ async def lifespan(app: FastAPI):
     # Init DB
     await init_db()
 
+    # ── Load YOLOv8-nano model (non-blocking — runs in executor) ─────────────
+    # Model is ~6MB and loads in ~1s. We do it at startup so first-frame
+    # latency is zero rather than stalling the first real detection.
+    if settings.AI_ENABLED:
+        try:
+            from app.services.ai_inference import YOLOInferenceEngine
+            loop = asyncio.get_event_loop()
+            loaded = await loop.run_in_executor(
+                None, YOLOInferenceEngine.ensure_loaded, settings.YOLO_MODEL_PATH or None
+            )
+            if loaded:
+                logger.info("✅ YOLOv8-nano ready for real camera detection")
+            else:
+                logger.warning("⚠️  YOLOv8 model not loaded — falling back to simulation")
+        except Exception as e:
+            logger.warning(f"⚠️  YOLOv8 load failed ({e}) — simulation mode active")
+
     # ── Camera Manager (Intent Layer) ─────────────────────────────────────────
-    # NOTE: The camera manager's frame callback is intentionally NOT wired to
-    # handle_detection here. The video pipeline (simulation) runs separately and
-    # calls handle_detection with fully-structured detection dicts.
-    # When real YOLO/DeepSORT is integrated, wire the AI inference callback here.
+    # Wire the AI frame callback BEFORE starting streams so no frames are missed.
+    if settings.AI_ENABLED:
+        _wire_ai_to_camera_manager()
+
     await camera_manager.start()
 
-    # Register pipeline callback and start (simulation pipeline)
+    # ── Simulation pipeline (always runs — generates demo data) ──────────────
+    # In SIMULATION_ONLY mode (no real cameras / AI disabled) this is the sole
+    # data source. When real cameras + AI are active, the sim runs in parallel
+    # so the dashboard always has activity even if the camera isn't aimed at anyone.
     pipeline.register_callback(handle_detection)
     await pipeline.start()
 
     # Schedule daily report job
     _schedule_reports()
 
-    logger.info("✅ System ready — pipeline running")
+    logger.info("✅ System ready — AI=%s simulation=running", settings.AI_ENABLED)
     yield
 
     # Shutdown
     await pipeline.stop()
     await camera_manager.stop()
     logger.info("👋 RBIS shutdown complete")
+
+
+def _wire_ai_to_camera_manager():
+    """
+    Register an async frame callback on CameraManager so every FRAME_READY
+    intent from a real camera flows through YOLOv8 → behavior analyzer
+    → handle_detection → scoring / alerts / WebSocket.
+    """
+    from app.services.ai_inference import get_or_create_processor
+
+    async def _ai_frame_callback(frame_payload: dict):
+        """
+        Called by CameraManager._on_frame_ready() for every real camera frame.
+        frame_payload = {camera_id: str, frame: np.ndarray, sequence: int}
+        """
+        camera_id = frame_payload.get("camera_id", "unknown")
+        frame     = frame_payload.get("frame")
+        if frame is None:
+            return
+        processor = get_or_create_processor(camera_id, handle_detection)
+        await processor.on_frame(frame)
+
+    camera_manager.register_frame_callback(_ai_frame_callback)
+    logger.info("AI frame callback registered on CameraManager")
 
 
 def _schedule_reports():
@@ -180,6 +225,7 @@ app.include_router(analytics.router,  prefix="/api")
 app.include_router(cameras.router,    prefix="/api")
 app.include_router(cameras.ws_router)
 app.include_router(events.router,     prefix="/api")
+app.include_router(auth.router,       prefix="/api")
 
 
 # ── Static media files ─────────────────────────────────────────────────────────

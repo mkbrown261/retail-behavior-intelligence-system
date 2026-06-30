@@ -21,7 +21,7 @@ class SuspicionScore(Base):
     level = Column(String, nullable=True)        # NORMAL | WATCH | HIGH_SUSPICION
 
     timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
-    camera_id = Column(Integer, nullable=True)
+    camera_id = Column(String, nullable=True)   # Task 2.4: string to match cameras.yaml IDs
 
     # Relationship
     person = relationship("Person", back_populates="suspicion_scores")

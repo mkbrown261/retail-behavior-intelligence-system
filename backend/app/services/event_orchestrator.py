@@ -58,7 +58,10 @@ async def _process_detection(db: AsyncSession, detection: Dict):
 
     session_id = detection["session_id"]
     event_type = detection["event_type"]
-    camera_id  = detection.get("camera_id", 0)
+    # Task 2.4: camera_id is always stored as a STRING throughout the system.
+    # The simulation pipeline uses integers (0,1,...); real cameras use string IDs.
+    # Normalise to string so heatmap, alerts and events all reference the same key.
+    camera_id  = str(detection.get("camera_id", "0"))
     bbox       = detection.get("bounding_box")
     pos_x      = detection.get("position_x", 0.5)
     pos_y      = detection.get("position_y", 0.5)
@@ -121,7 +124,18 @@ async def _process_detection(db: AsyncSession, detection: Dict):
         or (event_type == "EXIT_STORE" and current_score >= 61)
     )
     if should_alert:
-        snap_path = await save_snapshot(None, session_id, camera_id, event_type)
+        # Task 2.5: try to grab a real JPEG from the live camera.
+        # save_snapshot() will pull from camera_manager if no bytes are supplied.
+        live_frame: Optional[bytes] = None
+        try:
+            from app.camera.camera_manager import camera_manager
+            live_frame = camera_manager.get_jpeg(camera_id, quality=85)
+        except Exception:
+            pass
+        snap_path = await save_snapshot(
+            live_frame, session_id, camera_id, event_type,
+            try_live_camera=(live_frame is None),  # skip double-pull if we got it
+        )
         alert = await create_alert(
             db, person.id, session_id,
             score_result["score"], event_type, camera_id,
@@ -171,7 +185,7 @@ async def _get_or_create_person(
     session_id: str,
     dominant_color: str,
     is_staff: bool,
-    camera_id: int,
+    camera_id: str,
 ) -> Person:
     if session_id in _session_to_person_id:
         pid = _session_to_person_id[session_id]
@@ -210,7 +224,7 @@ async def _log_event(
     db: AsyncSession,
     person: Person,
     event_type: str,
-    camera_id: int,
+    camera_id: str,
     bbox,
     pos_x: float,
     pos_y: float,

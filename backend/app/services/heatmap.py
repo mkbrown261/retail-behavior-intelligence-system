@@ -27,7 +27,7 @@ def _to_grid(norm_x: float, norm_y: float):
 async def record_position(
     db: AsyncSession,
     person_id: str,
-    camera_id: int,
+    camera_id: str,   # Task 2.4: string camera ID (was int)
     norm_x: float,
     norm_y: float,
     interaction_type: str = "WALK",

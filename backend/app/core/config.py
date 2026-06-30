@@ -82,6 +82,19 @@ class Settings(BaseSettings):
     REPORT_GENERATION_HOUR:   int = 23
     REPORT_GENERATION_MINUTE: int = 55
 
+    # ── AI / YOLOv8 ──────────────────────────────────────────────────────────────
+    # Set AI_ENABLED=true in .env to activate real camera detection.
+    # When false (default) the system runs in simulation-only mode.
+    AI_ENABLED:        bool  = False
+    YOLO_MODEL_PATH:   str   = ""          # auto-downloaded to data/ if blank
+    AI_FRAME_SKIP:     int   = 3           # process every Nth frame
+    AI_CONFIDENCE:     float = 0.40        # min YOLO detection confidence
+
+    # ── JWT Auth ──────────────────────────────────────────────────────────────────
+    JWT_ALGORITHM:         str = "HS256"
+    JWT_ACCESS_EXPIRES_M:  int = 60        # access token lifetime (minutes)
+    JWT_REFRESH_EXPIRES_D: int = 7         # refresh token lifetime (days)
+
     # ── WebSocket limits ──────────────────────────────────────────────────────
     WS_MAX_CONNECTIONS: int = 100   # refuse connections above this
     WS_MAX_MESSAGE_SIZE: int = 65536  # 64 KB max incoming WS message
