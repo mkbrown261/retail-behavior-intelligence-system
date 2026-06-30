@@ -72,21 +72,23 @@ async def lifespan(app: FastAPI):
 
     await camera_manager.start()
 
-    # ── Simulation pipeline (always runs — generates demo data) ──────────────
-    # In SIMULATION_ONLY mode (no real cameras / AI disabled) this is the sole
-    # data source. When real cameras + AI are active, the sim runs in parallel
-    # so the dashboard always has activity even if the camera isn't aimed at anyone.
-    pipeline.register_callback(handle_detection)
-    await pipeline.start()
+    # ── Simulation pipeline ───────────────────────────────────────────────────
+    # Only runs when AI is disabled (demo/dev mode).
+    # When AI_ENABLED=true, real camera frames drive detections instead.
+    if not settings.AI_ENABLED:
+        pipeline.register_callback(handle_detection)
+        await pipeline.start()
+        logger.info("✅ System ready — simulation mode")
+    else:
+        logger.info("✅ System ready — AI=true, using real camera feeds")
 
     # Schedule daily report job
     _schedule_reports()
-
-    logger.info("✅ System ready — AI=%s simulation=running", settings.AI_ENABLED)
     yield
 
     # Shutdown
-    await pipeline.stop()
+    if not settings.AI_ENABLED:
+        await pipeline.stop()
     await camera_manager.stop()
     logger.info("👋 RBIS shutdown complete")
 
