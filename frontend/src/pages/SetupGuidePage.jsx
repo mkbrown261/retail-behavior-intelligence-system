@@ -64,6 +64,14 @@ const METHODS = [
         note: 'Never share or commit the .env file. It is already in .gitignore.',
       },
       {
+        title: 'Turn on real camera detection',
+        detail: 'By default RBIS runs in demo mode with simulated data — no camera is touched until you explicitly turn detection on. This is intentional: RBIS never starts analyzing anyone without you deliberately choosing to.',
+        commands: [
+          { label: 'In backend/.env, set', cmd: 'AI_ENABLED=true' },
+        ],
+        note: 'This loads the on-device detection model (~6.5 MB, downloaded once) and starts processing your configured camera(s). Add your cameras in the dashboard (Cameras → + Add Camera) either before or after this step.',
+      },
+      {
         title: 'Start the system',
         detail: 'This one command installs all dependencies and starts the backend server.',
         commands: [
@@ -125,6 +133,14 @@ const METHODS = [
           { label: 'Paste key into backend/.env next to SECRET_KEY=', cmd: 'nano backend/.env', isNote: true },
         ],
         note: 'If you don\'t have Python, Docker can generate it: docker run --rm python:3.11 python3 -c "import secrets; print(secrets.token_hex(32))"',
+      },
+      {
+        title: 'Turn on real camera detection',
+        detail: 'By default RBIS runs in demo mode with simulated data — no camera is touched until you explicitly turn detection on. This is intentional: RBIS never starts analyzing anyone without you deliberately choosing to.',
+        commands: [
+          { label: 'In backend/.env, set', cmd: 'AI_ENABLED=true' },
+        ],
+        note: 'This loads the on-device detection model (~6.5 MB, downloaded once) and starts processing your configured camera(s). Add your cameras in the dashboard (Cameras → + Add Camera) either before or after this step.',
       },
       {
         title: 'Start RBIS with Docker Compose',
@@ -212,6 +228,16 @@ const METHODS = [
           { label: 'Run the setup script', cmd: 'bash setup-pi.sh' },
         ],
         note: 'Takes 5–10 minutes. The Pi will set its hostname to "rbis" so you can reach it at http://rbis.local:8000 from any device on the same network.',
+      },
+      {
+        title: 'Turn on real camera detection',
+        detail: 'The setup script creates .env with a secure secret key, but leaves detection off by default — RBIS never starts analyzing anyone without you deliberately choosing to. Edit .env and restart the service.',
+        commands: [
+          { label: 'Edit the config', cmd: 'nano backend/.env' },
+          { label: 'Set', cmd: 'AI_ENABLED=true' },
+          { label: 'Restart the service to apply it', cmd: 'sudo systemctl restart rbis' },
+        ],
+        note: 'This loads the on-device detection model (~6.5 MB, downloaded once) and starts processing your configured camera(s).',
       },
       {
         title: 'Verify it is running',

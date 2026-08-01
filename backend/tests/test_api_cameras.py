@@ -2,7 +2,6 @@
 test_api_cameras.py — HTTP-level tests for the /api/cameras endpoints.
 
 Tests cover:
-  - GET /api/cameras/feeds          pipeline feed info
   - GET /api/cameras/ws/status      WebSocket connection status
   - GET /api/cameras                list cameras
   - POST /api/cameras               add a MOCK camera
@@ -13,19 +12,6 @@ Tests cover:
   - AddCameraRequest validation (invalid camera_id, cam_type)
 """
 import pytest
-
-
-# ── GET /api/cameras/feeds ────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_camera_feeds_returns_structure(client):
-    """Feeds endpoint should return feeds, active_persons, real_cameras."""
-    resp = await client.get("/api/cameras/feeds")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "feeds" in data
-    assert "active_persons" in data
-    assert "real_cameras" in data
 
 
 # ── GET /api/cameras/ws/status ────────────────────────────────────────────────

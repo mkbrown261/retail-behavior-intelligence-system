@@ -45,18 +45,47 @@ async def send_email(to: str, subject: str, html_body: str) -> bool:
         return False
 
 
+def _recommendation(alert) -> str:
+    breakdown = alert.event_breakdown or {}
+    return breakdown.get("recommendation", "")
+
+
 async def dispatch_alert_notifications(alert, person_session_id: str):
-    """Dispatch all configured notification channels for a critical alert."""
+    """
+    Dispatch notification channels, tiered by severity AND the Confidence
+    Score's recommendation (not just severity alone — a CRITICAL alert with
+    a "Review Before Escalation" read, e.g. only one weak corroborating
+    signal, shouldn't page someone at 2am the same way a genuinely
+    corroborated "Escalate" read should):
+
+      CRITICAL + "Escalate — High Confidence"  -> SMS (if configured) + email
+      everything else that alerts at all       -> email only
+      (LOW-severity/never-alerting cases never reach this function)
+
+    This is what "relay it to the proper person" actually means in practice —
+    the routing decision, not just whether a notification fires at all.
+    """
     score = alert.suspicion_score
     title = alert.title
     desc = alert.description or ""
-    msg = f"RBIS ALERT [{alert.severity}]: {title} | Score: {score:.0f}/100 | {desc[:100]}"
+    recommendation = _recommendation(alert)
+    is_top_tier = alert.severity == "CRITICAL" and recommendation == "Escalate — High Confidence"
+
+    if is_top_tier and settings.ALERT_SMS_TO:
+        sms_msg = f"RBIS URGENT [{alert.severity}]: {title} | Score: {score:.0f}/100 | {recommendation}"
+        await send_sms(settings.ALERT_SMS_TO, sms_msg)
 
     if settings.ALERT_EMAIL_TO:
+        urgency_banner = (
+            "🚨 IMMEDIATE ATTENTION — corroborated by multiple independent signals"
+            if is_top_tier else "Review when convenient"
+        )
         html = f"""
         <h2 style='color:#b71c1c'>🚨 {title}</h2>
+        <p style='color:#b71c1c'><b>{urgency_banner}</b></p>
         <p><b>Severity:</b> {alert.severity}</p>
         <p><b>Suspicion Score:</b> {score:.1f}/100</p>
+        <p><b>Confidence Recommendation:</b> {recommendation or 'N/A'}</p>
         <p><b>Person:</b> {person_session_id}</p>
         <p><b>Camera:</b> {alert.camera_id}</p>
         <p>{desc}</p>
@@ -65,4 +94,4 @@ async def dispatch_alert_notifications(alert, person_session_id: str):
         """
         await send_email(settings.ALERT_EMAIL_TO, f"[RBIS] {title}", html)
 
-    logger.info(f"Alert notifications dispatched for: {title}")
+    logger.info(f"Alert notifications dispatched for: {title} (tier={'SMS+email' if is_top_tier else 'email'})")

@@ -77,10 +77,26 @@ class Settings(BaseSettings):
     SENDGRID_API_KEY:    str = ""
     ALERT_EMAIL_FROM:    str = ""
     ALERT_EMAIL_TO:      str = ""
+    # Tiered routing: CRITICAL/high-confidence alerts page this number by SMS
+    # immediately; everything else goes to email only. Keeps the person who
+    # gets paged at 2am to the alerts that actually warrant it.
+    ALERT_SMS_TO:        str = ""
 
     # ── Reports ───────────────────────────────────────────────────────────────
     REPORT_GENERATION_HOUR:   int = 23
     REPORT_GENERATION_MINUTE: int = 55
+
+    # ── Data retention ────────────────────────────────────────────────────────
+    # Structurally enforces the privacy stance (behavioral signals only — no
+    # PII, no biometric identity) rather than leaving it as policy alone.
+    # Tracking data older than this is purged daily: Person/Event/SuspicionScore/
+    # HeatmapPoint/SensorEvent rows and their associated snapshot/clip files.
+    # Alerts are kept 2x as long by default (they're the record a business
+    # needs to justify an action already taken) — see ALERT_RETENTION_DAYS.
+    DATA_RETENTION_DAYS:      int  = 30
+    ALERT_RETENTION_DAYS:     int  = 60
+    RETENTION_PURGE_HOUR:     int  = 3    # run overnight, low-traffic
+    RETENTION_PURGE_MINUTE:   int  = 15
 
     # ── AI / YOLOv8 ──────────────────────────────────────────────────────────────
     # Set AI_ENABLED=true in .env to activate real camera detection.

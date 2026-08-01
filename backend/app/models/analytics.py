@@ -129,6 +129,9 @@ class DailyReport(Base):
     risk_time_windows = Column(JSON, nullable=True)  # [{hour, risk_score}]
     most_targeted_areas = Column(JSON, nullable=True)
 
+    event_type_breakdown = Column(JSON, nullable=True)  # {"PICK_ITEM": 12, "CONCEALMENT": 2, ...}
+    sensor_events_count  = Column(Integer, default=0)   # RFID/POS/badge events ingested that day
+
     pdf_path = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -138,6 +141,7 @@ class DailyReport(Base):
             "report_date": self.report_date,
             "total_visitors": self.total_visitors,
             "unique_customers": self.unique_customers,
+            "staff_count": self.staff_count,
             "total_events": self.total_events,
             "suspicious_events": self.suspicious_events,
             "total_alerts": self.total_alerts,
@@ -145,6 +149,11 @@ class DailyReport(Base):
             "avg_suspicion_score": self.avg_suspicion_score,
             "peak_hour": self.peak_hour,
             "busiest_zone": self.busiest_zone,
+            "top_incidents": self.top_incidents,
+            "risk_time_windows": self.risk_time_windows,
+            "most_targeted_areas": self.most_targeted_areas,
+            "event_type_breakdown": self.event_type_breakdown,
+            "sensor_events_count": self.sensor_events_count,
             "pdf_path": self.pdf_path,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

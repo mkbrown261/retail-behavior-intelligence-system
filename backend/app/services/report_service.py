@@ -64,16 +64,41 @@ async def generate_daily_report(
     critical_alerts = critical_q.scalar() or 0
 
     # ── Top 10 incidents ──────────────────────────────────────────────────────
+    # Includes the Confidence Score breakdown snapshot (event_breakdown, saved
+    # on the alert at creation time — see event_orchestrator.py) so a report
+    # reader sees WHY each incident scored high, not just the number.
     top_alerts_q = await db.execute(
-        select(Alert.id, Alert.severity, Alert.suspicion_score, Alert.title, Alert.person_id)
+        select(Alert.id, Alert.severity, Alert.suspicion_score, Alert.title, Alert.person_id, Alert.event_breakdown)
         .where(Alert.timestamp.between(day_start, day_end))
         .order_by(Alert.suspicion_score.desc())
         .limit(10)
     )
-    top_incidents = [
-        {"id": r[0], "severity": r[1], "score": r[2], "title": r[3], "person_id": r[4]}
-        for r in top_alerts_q.all()
-    ]
+    top_incidents = []
+    for r in top_alerts_q.all():
+        breakdown = r[5] or {}
+        top_incidents.append({
+            "id": r[0], "severity": r[1], "score": r[2], "title": r[3], "person_id": r[4],
+            "confidence": breakdown.get("overall_confidence"),
+            "recommendation": breakdown.get("recommendation"),
+        })
+
+    # ── Event type breakdown — especially the pose-kinematic signals
+    # (CONCEALMENT, PICK_ITEM) and navigation patterns (SHELF_REVISIT,
+    # EXTENDED_DWELL) added tonight ────────────────────────────────────────────
+    event_types_q = await db.execute(
+        select(Event.event_type, func.count(Event.id))
+        .where(Event.timestamp.between(day_start, day_end))
+        .group_by(Event.event_type)
+    )
+    event_type_breakdown = {row[0]: row[1] for row in event_types_q.all()}
+
+    # ── Sensor Bus activity (RFID/POS/badge events ingested that day) ──────────
+    from app.models.sensor import SensorEvent
+    sensor_count_q = await db.execute(
+        select(func.count(SensorEvent.id))
+        .where(SensorEvent.timestamp.between(day_start, day_end))
+    )
+    sensor_events_count = sensor_count_q.scalar() or 0
 
     # ── Peak hour ─────────────────────────────────────────────────────────────
     from app.models.analytics import HeatmapPoint
@@ -125,6 +150,8 @@ async def generate_daily_report(
         peak_hour=peak_hour,
         top_incidents=top_incidents,
         risk_time_windows=risk_windows,
+        event_type_breakdown=event_type_breakdown,
+        sensor_events_count=sensor_events_count,
     )
 
     if report:
@@ -188,6 +215,7 @@ async def _generate_pdf(report: DailyReport, top_incidents: list, risk_windows: 
             ["Critical Alerts", str(report.critical_alerts)],
             ["Avg Suspicion Score", f"{report.avg_suspicion_score:.1f}/100"],
             ["Peak Activity Hour", f"{report.peak_hour:02d}:00" if report.peak_hour is not None else "N/A"],
+            ["Sensor Bus Events (RFID/POS/badge)", str(report.sensor_events_count or 0)],
         ]
         t = Table(kpi_data, colWidths=[9 * cm, 6 * cm])
         t.setStyle(TableStyle([
@@ -204,19 +232,47 @@ async def _generate_pdf(report: DailyReport, top_incidents: list, risk_windows: 
         story.append(t)
         story.append(Spacer(1, 0.6 * cm))
 
+        # ── Event Type Breakdown ─────────────────────────────────────────────
+        event_type_breakdown = getattr(report, "event_type_breakdown", None) or {}
+        if event_type_breakdown:
+            story.append(Paragraph("Detected Behavior Breakdown", styles["Heading2"]))
+            et_data = [["Event Type", "Count"]] + [
+                [k, str(v)] for k, v in sorted(event_type_breakdown.items(), key=lambda kv: -kv[1])
+            ]
+            et_table = Table(et_data, colWidths=[10 * cm, 6 * cm])
+            et_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#00695c")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#e0f2f1"), colors.white]),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("ALIGN", (1, 0), (1, -1), "CENTER"),
+                ("FONTSIZE", (0, 0), (-1, -1), 10),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ]))
+            story.append(et_table)
+            story.append(Spacer(1, 0.6 * cm))
+
         # ── Top Incidents ─────────────────────────────────────────────────
+        # Includes the Confidence Score's plain-language recommendation, not
+        # just the raw suspicion number — "Review Before Escalation" tells a
+        # human reader what to do with this row, the score alone doesn't.
         story.append(Paragraph("Top 10 Highest Suspicion Incidents", styles["Heading2"]))
         if top_incidents:
-            inc_data = [["#", "Person ID", "Severity", "Score", "Title"]]
+            inc_data = [["#", "Person ID", "Severity", "Score", "Recommendation", "Title"]]
             for i, inc in enumerate(top_incidents[:10], 1):
+                confidence = inc.get("confidence")
+                recommendation = inc.get("recommendation") or (f"{confidence:.0f}% confidence" if confidence is not None else "—")
                 inc_data.append([
                     str(i),
                     str(inc.get("person_id", ""))[:12],
                     inc.get("severity", ""),
                     f"{inc.get('score', 0):.1f}",
-                    str(inc.get("title", ""))[:55],
+                    recommendation[:28],
+                    str(inc.get("title", ""))[:40],
                 ])
-            inc_table = Table(inc_data, colWidths=[1 * cm, 3 * cm, 2.5 * cm, 2 * cm, 7.5 * cm])
+            inc_table = Table(inc_data, colWidths=[0.8 * cm, 2.5 * cm, 2 * cm, 1.5 * cm, 4.2 * cm, 5 * cm])
             sev_colors = {"CRITICAL": colors.HexColor("#b71c1c"), "HIGH": colors.HexColor("#e53935"),
                           "MEDIUM": colors.HexColor("#fb8c00"), "LOW": colors.HexColor("#43a047")}
             inc_style = [

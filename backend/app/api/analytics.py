@@ -18,6 +18,22 @@ async def heatmap(
     return await get_heatmap_data(db, day, hour, interaction_type)
 
 
+@router.get("/store-health")
+async def store_health(
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(7, ge=1, le=90),
+    camera_id: Optional[str] = None,
+):
+    """
+    Store Health Score — reframes the same alerts/events data as business
+    intelligence rather than raw theft-detection output: response time,
+    peak risk window, high-risk named zones, and a trend-adjusted composite
+    score. See app/services/store_health.py for the scoring methodology.
+    """
+    from app.services.store_health import get_store_health
+    return await get_store_health(db, days=days, camera_id=camera_id)
+
+
 @router.get("/heatmap/hourly")
 async def heatmap_hourly(
     db: AsyncSession = Depends(get_db),

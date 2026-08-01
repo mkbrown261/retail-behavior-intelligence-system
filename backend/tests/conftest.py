@@ -37,6 +37,7 @@ import app.models.suspicion   # noqa: F401, E402
 import app.models.media       # noqa: F401, E402
 import app.models.analytics   # noqa: F401, E402
 import app.models.user        # noqa: F401, E402
+import app.models.sensor      # noqa: F401, E402
 
 
 # ── Test engine / session factory ─────────────────────────────────────────────

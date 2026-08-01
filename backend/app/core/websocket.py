@@ -21,6 +21,7 @@ class ConnectionManager:
             "events":     set(),
             "heatmap":    set(),
             "cameras":    set(),
+            "pose":       set(),   # live keypoints, broadcast every processed frame
         }
         self._lock = asyncio.Lock()
 

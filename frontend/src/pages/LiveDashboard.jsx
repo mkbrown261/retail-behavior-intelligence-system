@@ -39,13 +39,13 @@ function EventTicker({ events }) {
               <span className="text-rbis-500 font-mono flex-shrink-0">{e.time}</span>
               <span className="font-mono text-rbis-300 flex-shrink-0">{e.session_id}</span>
               <span className={`flex-shrink-0 ${
-                e.event_type === 'BYPASS_REGISTER' || e.event_type === 'EXIT_AFTER_PICK'
+                e.event_type === 'CONCEALMENT' || e.event_type === 'COLOR_DISAPPEARANCE' || e.event_type === 'BYPASS_REGISTER' || e.event_type === 'EXIT_AFTER_PICK'
                   ? 'text-red-400 font-bold'
-                  : e.event_type === 'PICK_ITEM' || e.event_type === 'HOLD_ITEM'
+                  : e.event_type === 'PICK_ITEM' || e.event_type === 'HOLD_ITEM' || e.event_type === 'SHELF_REVISIT' || e.event_type === 'EXTENDED_DWELL'
                   ? 'text-yellow-400'
                   : 'text-rbis-400'
               }`}>{e.event_type}</span>
-              <span className="text-rbis-600 text-xs">CAM{e.camera_id + 1}</span>
+              <span className="text-rbis-600 text-xs">{e.camera_id}</span>
             </div>
           ))
         )}
@@ -55,13 +55,20 @@ function EventTicker({ events }) {
 }
 
 export default function LiveDashboard() {
-  const { connected, lastDetection, lastAlert, lastScore } = useWebSocket()
+  const { connected, lastDetection, lastAlert, lastScore, lastPose } = useWebSocket()
   const [stats, setStats] = useState({ total: 0, active: 0, flagged: 0, staff: 0 })
   const [systemStatus, setSystemStatus] = useState({})
   const [livePersons, setLivePersons] = useState([])
   const [selectedPersonId, setSelectedPersonId] = useState(null)
   const [recentEvents, setRecentEvents] = useState([])
+  const [posesByCamera, setPosesByCamera] = useState({})
   const eventsRef = useRef([])
+
+  // Live pose keypoints per camera, for the hand-tracking skeleton overlay
+  useEffect(() => {
+    if (!lastPose) return
+    setPosesByCamera(prev => ({ ...prev, [lastPose.camera_id]: lastPose.poses }))
+  }, [lastPose])
 
   // Load stats periodically
   useEffect(() => {
@@ -97,6 +104,12 @@ export default function LiveDashboard() {
     eventsRef.current = [evt, ...eventsRef.current].slice(0, 20)
     setRecentEvents([...eventsRef.current])
 
+    // Person left frame — drop them instead of leaving a stale tile forever.
+    if (lastDetection.event_type === 'EXIT_STORE') {
+      setLivePersons(prev => prev.filter(p => p.session_id !== lastDetection.session_id))
+      return
+    }
+
     // Update live persons for camera grid
     setLivePersons(prev => {
       const idx = prev.findIndex(p => p.session_id === lastDetection.session_id)
@@ -107,6 +120,7 @@ export default function LiveDashboard() {
         score: lastDetection.score,
         level: lastDetection.level,
         is_staff: lastDetection.is_staff,
+        last_seen: Date.now(),
       }
       if (idx >= 0) {
         const next = [...prev]
@@ -116,6 +130,16 @@ export default function LiveDashboard() {
       return [updated, ...prev].slice(0, 30)
     })
   }, [lastDetection])
+
+  // Safety net: drop persons with no update in 30s (occlusion, crash, tab
+  // left open across a backend restart — same TTL as the backend's live-scores).
+  useEffect(() => {
+    const t = setInterval(() => {
+      const cutoff = Date.now() - 30000
+      setLivePersons(prev => prev.filter(p => (p.last_seen || 0) > cutoff))
+    }, 5000)
+    return () => clearInterval(t)
+  }, [])
 
   // Score updates
   useEffect(() => {
@@ -170,7 +194,7 @@ export default function LiveDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Camera feeds — 2/3 width */}
         <div className="lg:col-span-2 space-y-3">
-          <CameraGrid livePersons={livePersons} />
+          <CameraGrid livePersons={livePersons} posesByCamera={posesByCamera} />
           <EventTicker events={recentEvents} />
         </div>
 

@@ -53,7 +53,7 @@ async def get_db():
 
 
 async def init_db():
-    from app.models import person, event, suspicion, media, analytics  # noqa: F401
+    from app.models import person, event, suspicion, media, analytics, sensor  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database initialized successfully")
@@ -83,7 +83,25 @@ async def _migrate_schema():
         ("events",           "camera_id"),
     ]
 
+    # New nullable columns added to an existing table — create_all() only
+    # creates missing TABLES, not missing COLUMNS on ones that already exist,
+    # so these need an explicit ADD COLUMN (safe/idempotent on SQLite).
+    new_columns = [
+        ("daily_reports", "event_type_breakdown", "JSON"),
+        ("daily_reports", "sensor_events_count",  "INTEGER DEFAULT 0"),
+    ]
+
     async with engine.begin() as conn:
+        for table, col, col_type in new_columns:
+            rows = (await conn.execute(text(f"PRAGMA table_info({table})"))).fetchall()
+            if any(r[1] == col for r in rows):
+                continue  # already has it
+            try:
+                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+                logger.info(f"Migration: added {table}.{col}")
+            except Exception as e:
+                logger.warning(f"Migration: could not add {table}.{col}: {e}")
+
         for table, col in migrations:
             # PRAGMA table_info returns: cid, name, type, notnull, dflt, pk
             rows = (await conn.execute(text(f"PRAGMA table_info({table})"))).fetchall()

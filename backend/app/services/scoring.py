@@ -27,6 +27,20 @@ SCORE_RULES = {
     "BYPASS_REGISTER":    25,
     "EXIT_AFTER_PICK":    20,
     "RAPID_EXIT":         15,
+    # Hand parked near hip/pocket after a real pick gesture (pose-kinematic
+    # signal, not a position guess) — the single strongest concealment cue
+    # this system can currently produce.
+    "CONCEALMENT":        35,
+    # Navigation patterns — weaker signals than concealment, but real
+    # browsing/scanning behavior distinct from a one-off LOITER burst.
+    "SHELF_REVISIT":      8,
+    "EXTENDED_DWELL":     10,
+    # Corroborating signal, independent of hand position — the wrist's color
+    # drifted back toward the empty-hand baseline after a pick (item's visual
+    # signature is gone). Weighted lower than CONCEALMENT alone since it's
+    # noisier (lighting/blur-sensitive); its real value is agreeing with the
+    # kinematic signal — see confidence.py's corroboration bonus.
+    "COLOR_DISAPPEARANCE": 20,
 }
 
 # ── Level thresholds ──────────────────────────────────────────────────────────
@@ -52,17 +66,23 @@ class LivePersonState:
         self.idle_since: Optional[datetime] = None
         self.has_interacted_with_item: bool = False
         self.visited_register: bool = False
+        self.hold_increments_applied: int = 0  # 10s increments already scored, for HOLD_ITEM
+        self.idle_increments_applied: int = 0  # 10s increments already scored, for IDLE_10S decay
 
 
 _live_states: Dict[str, LivePersonState] = {}
-_lock = asyncio.Lock()
+_lock = asyncio.Lock()  # asyncio.Lock is NOT reentrant — never acquire it twice on one path
+
+
+def _get_or_create_state_unlocked(person_id: str, session_id: str) -> LivePersonState:
+    if person_id not in _live_states:
+        _live_states[person_id] = LivePersonState(person_id, session_id)
+    return _live_states[person_id]
 
 
 async def get_or_create_state(person_id: str, session_id: str) -> LivePersonState:
     async with _lock:
-        if person_id not in _live_states:
-            _live_states[person_id] = LivePersonState(person_id, session_id)
-        return _live_states[person_id]
+        return _get_or_create_state_unlocked(person_id, session_id)
 
 
 async def apply_score_delta(
@@ -73,18 +93,25 @@ async def apply_score_delta(
     camera_id: Optional[int] = None,
     extra_delta: float = 0.0,
 ) -> Dict:
-    state = await get_or_create_state(person_id, session_id)
+    # Hold the lock across the ENTIRE read-modify-write — multiple events for
+    # the same person can fire in the same processed frame (e.g. BYPASS_REGISTER
+    # + EXIT_STORE together), and without this they race: both read the same
+    # stale score, compute independently, and whichever writes last silently
+    # discards the other's delta (score visibly jumps backward despite every
+    # delta being positive).
+    async with _lock:
+        state = _get_or_create_state_unlocked(person_id, session_id)
 
-    delta = SCORE_RULES.get(reason, 0.0) + extra_delta
+        delta = SCORE_RULES.get(reason, 0.0) + extra_delta
 
-    # Clamp score between 0 and 100
-    new_score = max(0.0, min(100.0, state.score + delta))
-    old_level = state.level
-    new_level = score_to_level(new_score)
+        # Clamp score between 0 and 100
+        new_score = max(0.0, min(100.0, state.score + delta))
+        old_level = state.level
+        new_level = score_to_level(new_score)
 
-    state.score = new_score
-    state.level = new_level
-    state.last_update = datetime.now(timezone.utc)
+        state.score = new_score
+        state.level = new_level
+        state.last_update = datetime.now(timezone.utc)
 
     # Persist score snapshot
     snap = SuspicionScore(
@@ -140,8 +167,16 @@ async def process_event_for_score(
     """Map event types to score adjustments."""
     metadata = metadata or {}
 
+    # Refresh the TTL clock on every detection for this person, not just ones
+    # that produce a score delta — RAPID_MOVEMENT/LOITER never call
+    # apply_score_delta, so without this a person who's just moving around
+    # (no scoring events) goes "stale" and get_all_live_scores() prunes them,
+    # silently resetting items_held/score on their next real event.
+    _touch_state = await get_or_create_state(person_id, session_id)
+    _touch_state.last_update = datetime.now(timezone.utc)
+
     if event_type == "PICK_ITEM":
-        state = await get_or_create_state(person_id, session_id)
+        state = _touch_state
         if state.items_held > 0:
             result = await apply_score_delta(db, person_id, session_id, "MULTI_ITEM", camera_id)
         else:
@@ -150,30 +185,81 @@ async def process_event_for_score(
         state.holding_since = datetime.now(timezone.utc)
         state.has_interacted_with_item = True
         state.idle_since = None
+        state.hold_increments_applied = 0
         return result
 
     elif event_type == "HOLD_ITEM":
+        state = _touch_state
         hold_seconds = metadata.get("duration_seconds", 0)
-        increments = int(hold_seconds // 10)
-        extra = increments * settings.SCORE_HOLD_ITEM_PER_10S
+        total_increments = int(hold_seconds // 10)
+        new_increments = max(0, total_increments - state.hold_increments_applied)
+        state.hold_increments_applied = total_increments
+        if new_increments <= 0:
+            return {
+                "person_id": person_id, "session_id": session_id,
+                "score": state.score, "delta": 0, "reason": "HOLD_ITEM_10S",
+                "level": state.level, "level_changed": False, "crossed_threshold": False,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        extra = new_increments * settings.SCORE_HOLD_ITEM_PER_10S
         return await apply_score_delta(db, person_id, session_id, "HOLD_ITEM_10S", camera_id, extra - settings.SCORE_HOLD_ITEM_PER_10S)
 
+    elif event_type == "IDLE_10S":
+        # Score decay for calm behavior — without this a score that hits 100
+        # stays pinned at HIGH_SUSPICION for the rest of the visit even after
+        # the person returns to completely normal behavior. Same incremental
+        # pattern as HOLD_ITEM_10S (only apply NEW 10s increments since last
+        # applied, not the full cumulative duration each time — that was the
+        # exact compounding bug HOLD_ITEM_10S had before it was fixed).
+        state = _touch_state
+        idle_seconds = metadata.get("duration_seconds", 0)
+        total_increments = int(idle_seconds // 10)
+        if total_increments < state.idle_increments_applied:
+            # calm_frames reset upstream (new calm period began) — start fresh
+            state.idle_increments_applied = 0
+        new_increments = max(0, total_increments - state.idle_increments_applied)
+        state.idle_increments_applied = total_increments
+        if new_increments <= 0:
+            return {
+                "person_id": person_id, "session_id": session_id,
+                "score": state.score, "delta": 0, "reason": "IDLE_10S",
+                "level": state.level, "level_changed": False, "crossed_threshold": False,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        extra = new_increments * settings.SCORE_IDLE_PER_10S
+        return await apply_score_delta(db, person_id, session_id, "IDLE_10S", camera_id, extra - settings.SCORE_IDLE_PER_10S)
+
     elif event_type == "RETURN_ITEM":
-        state = await get_or_create_state(person_id, session_id)
+        state = _touch_state
         state.items_held = max(0, state.items_held - 1)
         state.holding_since = None
+        if state.items_held == 0:
+            state.hold_increments_applied = 0
         return await apply_score_delta(db, person_id, session_id, "RETURN_ITEM", camera_id)
 
     elif event_type == "COMPLETE_CHECKOUT":
-        state = await get_or_create_state(person_id, session_id)
+        state = _touch_state
         state.visited_register = True
         state.items_held = 0
+        state.hold_increments_applied = 0
         return await apply_score_delta(db, person_id, session_id, "COMPLETE_CHECKOUT", camera_id)
 
     elif event_type == "APPROACH_REGISTER":
         state = await get_or_create_state(person_id, session_id)
         state.visited_register = True
         return {"person_id": person_id, "score": state.score, "delta": 0, "reason": "APPROACH_REGISTER", "level": state.level}
+
+    elif event_type == "CONCEALMENT":
+        return await apply_score_delta(db, person_id, session_id, "CONCEALMENT", camera_id)
+
+    elif event_type == "SHELF_REVISIT":
+        return await apply_score_delta(db, person_id, session_id, "SHELF_REVISIT", camera_id)
+
+    elif event_type == "EXTENDED_DWELL":
+        return await apply_score_delta(db, person_id, session_id, "EXTENDED_DWELL", camera_id)
+
+    elif event_type == "COLOR_DISAPPEARANCE":
+        return await apply_score_delta(db, person_id, session_id, "COLOR_DISAPPEARANCE", camera_id)
 
     elif event_type == "BYPASS_REGISTER":
         state = await get_or_create_state(person_id, session_id)
@@ -197,7 +283,18 @@ async def process_event_for_score(
     return {"person_id": person_id, "score": 0, "delta": 0, "reason": event_type, "level": "NORMAL"}
 
 
+LIVE_STATE_TTL_SECONDS = 30  # drop tracks with no update in this long (crash/occlusion safety net)
+
+
 def get_all_live_scores() -> list:
+    now = datetime.now(timezone.utc)
+    stale = [
+        pid for pid, s in _live_states.items()
+        if (now - s.last_update).total_seconds() > LIVE_STATE_TTL_SECONDS
+    ]
+    for pid in stale:
+        _live_states.pop(pid, None)
+
     return [
         {
             "person_id": s.person_id,

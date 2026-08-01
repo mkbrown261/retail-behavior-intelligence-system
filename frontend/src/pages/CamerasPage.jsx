@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import AddCameraModal from '../components/cameras/AddCameraModal'
+import ZoneEditor from '../components/cameras/ZoneEditor'
 import { cameraAPI } from '../utils/api'
 import api from '../utils/api'
 
 const API_BASE    = import.meta.env.VITE_API_URL || ''
-const IS_DEMO     = !API_BASE          // no backend configured → demo mode
 
 const STATUS_DOT = {
   CONNECTED:    { color: '#3fb950', pulse: true,  label: 'Live'          },
@@ -18,6 +18,7 @@ const STATUS_DOT = {
 /* ─── Camera card ──────────────────────────────────────────────── */
 function CameraCard({ cam, onRemove, onRestart }) {
   const [snap, setSnap] = useState(null)
+  const [showZones, setShowZones] = useState(false)
   const dot      = STATUS_DOT[cam.status] || STATUS_DOT.STOPPED
   const name     = cam.extra?.display_name || cam.camera_id
   const location = cam.extra?.location || '—'
@@ -79,6 +80,11 @@ function CameraCard({ cam, onRemove, onRestart }) {
           </span>
         </div>
         <div className="flex gap-2">
+          <button onClick={() => setShowZones(true)}
+            className="flex-1 py-1.5 rounded-lg text-xs font-medium transition-all"
+            style={{ background: 'rgba(124,58,237,0.12)', color: '#a78bfa', border: '1px solid rgba(124,58,237,0.25)' }}>
+            📐 Zones
+          </button>
           <button onClick={() => onRestart(cam.camera_id)}
             className="flex-1 py-1.5 rounded-lg text-xs font-medium transition-all"
             style={{ background: 'rgba(255,255,255,0.06)', color: '#8b949e', border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -91,6 +97,7 @@ function CameraCard({ cam, onRemove, onRestart }) {
           </button>
         </div>
       </div>
+      {showZones && <ZoneEditor camera={cam} onClose={() => setShowZones(false)} />}
     </div>
   )
 }
@@ -168,8 +175,8 @@ function PhoneConnectPanel({ networkInfo }) {
   )
 }
 
-/* ─── Demo / no-backend guide ──────────────────────────────────── */
-function DemoGuide() {
+/* ─── Setup guide (shown when backend is unreachable, or as reference) ──── */
+function DemoGuide({ backendOk }) {
   const steps = [
     {
       icon: '💻',
@@ -199,26 +206,28 @@ function DemoGuide() {
 
   return (
     <div className="flex flex-col gap-4 max-w-2xl">
-      {/* Hero */}
-      <div className="rounded-2xl p-6 flex flex-col gap-3"
-        style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>
-        <div className="flex items-center gap-3">
-          <span className="text-3xl">📡</span>
-          <div>
-            <h2 className="text-lg font-bold text-white">No backend connected</h2>
-            <p className="text-sm mt-0.5" style={{ color: '#a78bfa' }}>
-              You're viewing the demo version. To connect real cameras, start the backend.
-            </p>
+      {/* Hero — only alarm the user if the backend is actually unreachable */}
+      {!backendOk && (
+        <div className="rounded-2xl p-6 flex flex-col gap-3"
+          style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}>
+          <div className="flex items-center gap-3">
+            <span className="text-3xl">📡</span>
+            <div>
+              <h2 className="text-lg font-bold text-white">No backend connected</h2>
+              <p className="text-sm mt-0.5" style={{ color: '#a78bfa' }}>
+                Couldn't reach the RBIS backend. Start it, then this page will reconnect automatically.
+              </p>
+            </div>
           </div>
+          <a
+            href="https://github.com/mkbrown261/retail-behavior-intelligence-system"
+            target="_blank" rel="noreferrer"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white self-start transition-all"
+            style={{ background: '#7c3aed' }}>
+            View Setup Guide on GitHub →
+          </a>
         </div>
-        <a
-          href="https://github.com/mkbrown261/retail-behavior-intelligence-system"
-          target="_blank" rel="noreferrer"
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white self-start transition-all"
-          style={{ background: '#7c3aed' }}>
-          View Setup Guide on GitHub →
-        </a>
-      </div>
+      )}
 
       {/* Steps */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -278,8 +287,8 @@ export default function CamerasPage() {
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [networkInfo, setNet] = useState(null)
-  const [tab, setTab]         = useState(IS_DEMO ? 'setup' : 'cameras')
-  const [backendOk, setBackendOk] = useState(!IS_DEMO)
+  const [tab, setTab]         = useState('cameras')
+  const [backendOk, setBackendOk] = useState(true)
 
   const refresh = useCallback(async () => {
     try {
@@ -420,7 +429,7 @@ export default function CamerasPage() {
 
       {/* ── Setup / Get Started tab ── */}
       {tab === 'setup' && (
-        <DemoGuide />
+        <DemoGuide backendOk={backendOk} />
       )}
 
       {/* Add camera modal */}

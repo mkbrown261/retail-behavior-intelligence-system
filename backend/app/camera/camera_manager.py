@@ -48,6 +48,60 @@ _CONFIG_SEARCH_PATHS = [
     Path("cameras.json"),
 ]
 
+# Zone calibration saved via the dashboard's zone-editor UI. Layered on top
+# of cameras.yaml at camera-start time (UI-saved values win) rather than
+# rewriting the human-edited YAML file directly, which would destroy comments
+# and formatting on every save.
+_ZONE_OVERRIDES_PATH = _HERE / "data" / "camera_zones.json"
+
+
+def _load_zone_overrides() -> Dict[str, Dict]:
+    try:
+        if _ZONE_OVERRIDES_PATH.exists():
+            return json.loads(_ZONE_OVERRIDES_PATH.read_text())
+    except Exception as e:
+        logger.warning(f"Failed to load zone overrides: {e}")
+    return {}
+
+
+def save_zone_override(camera_id: str, zones: Dict) -> None:
+    overrides = _load_zone_overrides()
+    overrides[camera_id] = zones
+    _ZONE_OVERRIDES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _ZONE_OVERRIDES_PATH.write_text(json.dumps(overrides, indent=2))
+
+
+# Business-facing zone names ("Hair Products" instead of "AISLE_A") — purely
+# a display concern, separate from the zone THRESHOLDS above which drive
+# actual detection behavior. A store owner naming their zones doesn't change
+# what the system detects, only how it's labeled back to them.
+_ZONE_LABELS_PATH = _HERE / "data" / "zone_labels.json"
+
+# The fixed zone codes _cx_to_zone() (in ai_inference.py) can produce —
+# duplicated here rather than imported to avoid a camera<->ai_inference
+# import cycle; these are stable, not expected to change often.
+KNOWN_ZONE_CODES = ["ENTRANCE", "AISLE_A", "AISLE_B", "AISLE_C", "CHECKOUT", "EXIT"]
+
+
+def _load_all_zone_labels() -> Dict[str, Dict[str, str]]:
+    try:
+        if _ZONE_LABELS_PATH.exists():
+            return json.loads(_ZONE_LABELS_PATH.read_text())
+    except Exception as e:
+        logger.warning(f"Failed to load zone labels: {e}")
+    return {}
+
+
+def get_zone_labels(camera_id: str) -> Dict[str, str]:
+    return _load_all_zone_labels().get(camera_id, {})
+
+
+def save_zone_labels(camera_id: str, labels: Dict[str, str]) -> None:
+    all_labels = _load_all_zone_labels()
+    all_labels[camera_id] = labels
+    _ZONE_LABELS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _ZONE_LABELS_PATH.write_text(json.dumps(all_labels, indent=2))
+
 
 # ── CameraManager ─────────────────────────────────────────────────────────────
 
@@ -361,6 +415,12 @@ class CameraManager:
             except (TypeError, ValueError):
                 pass
 
+        extra = dict(d.get("extra") or {})
+        zone_override = _load_zone_overrides().get(d["camera_id"])
+        if zone_override:
+            extra["zones"] = {**extra.get("zones", {}), **zone_override}
+            logger.info(f"CameraManager: applying saved zone calibration for '{d['camera_id']}'")
+
         cfg = CameraConfig(
             camera_id = d["camera_id"],
             cam_type  = cam_type,
@@ -370,7 +430,7 @@ class CameraManager:
             fps       = float(d.get("fps",  15.0)),
             username  = d.get("username", ""),
             password  = d.get("password", ""),
-            extra     = d.get("extra",    {}),
+            extra     = extra,
         )
 
         stream = CameraStream(cfg)

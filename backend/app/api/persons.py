@@ -18,6 +18,7 @@ from app.core.database import get_db
 from app.models.person import Person
 from app.models.event import Event
 from app.models.suspicion import SuspicionScore
+from app.models.sensor import SensorEvent
 from app.services.scoring import get_all_live_scores
 
 router = APIRouter(prefix="/persons", tags=["Persons"])
@@ -127,15 +128,26 @@ async def get_person_timeline(person_id: str, db: AsyncSession = Depends(get_db)
         .where(SuspicionScore.person_id == person_id)
         .order_by(SuspicionScore.timestamp)
     )
+    # Sensor Bus events (RFID/smart-shelf item reads, badge scans, etc.) are
+    # correlated by session_id, not person_id — merged in here so a reviewer
+    # sees "PICK_ITEM" from the camera next to "ITEM_IDENTIFIED: Nike Hoodie"
+    # from a shelf sensor in one timeline, without a rigid auto-link between
+    # the two (a human draws that connection by proximity in time).
+    sensors_q = await db.execute(
+        select(SensorEvent).where(SensorEvent.session_id == p.session_id).order_by(SensorEvent.timestamp)
+    ) if p.session_id else None
 
     events = [e.to_dict() for e in events_q.scalars().all()]
     scores = [s.to_dict() for s in scores_q.scalars().all()]
+    sensor_events = [s.to_dict() for s in sensors_q.scalars().all()] if sensors_q else []
 
     timeline = []
     for e in events:
         timeline.append({"kind": "EVENT", "data": e, "timestamp": e["timestamp"]})
     for s in scores:
         timeline.append({"kind": "SCORE", "data": s, "timestamp": s["timestamp"]})
+    for se in sensor_events:
+        timeline.append({"kind": "SENSOR", "data": se, "timestamp": se["timestamp"]})
     timeline.sort(key=lambda x: x["timestamp"] or "")
 
     return {
@@ -143,7 +155,26 @@ async def get_person_timeline(person_id: str, db: AsyncSession = Depends(get_db)
         "timeline":        timeline,
         "event_count":     len(events),
         "score_snapshots": len(scores),
+        "sensor_events":   len(sensor_events),
     }
+
+
+@router.get("/{person_id}/confidence")
+async def get_person_confidence(person_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Multi-factor Incident Confidence breakdown for a currently-tracked person —
+    transparent "why" behind the suspicion score (motion/object-interaction/
+    concealment/exit-behavior factors + a human recommendation), not just a
+    flat number. Returns null fields if the person has already exited (the
+    live tally is cleared then; use the alert's stored event_breakdown for
+    historical incidents instead).
+    """
+    from app.services import confidence as confidence_engine
+    _validate_uuid(person_id, "person_id")
+    breakdown = confidence_engine.get_breakdown(person_id)
+    if breakdown is None:
+        return {"person_id": person_id, "available": False, "reason": "no live tally (person not tracked or already exited)"}
+    return {"available": True, **breakdown}
 
 
 @router.get("/{person_id}/score-history")

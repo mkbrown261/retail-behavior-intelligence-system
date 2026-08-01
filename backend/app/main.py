@@ -21,7 +21,7 @@ from app.core.database import init_db
 from app.services.video_pipeline import pipeline
 from app.services.event_orchestrator import handle_detection
 from app.camera.camera_manager import camera_manager
-from app.api import persons, alerts, analytics, cameras, events
+from app.api import persons, alerts, analytics, cameras, events, sensors, admin
 from app.api import auth
 
 
@@ -87,6 +87,7 @@ async def lifespan(app: FastAPI):
 
     # Schedule daily report job
     _schedule_reports()
+    _schedule_retention()
     yield
 
     # Shutdown
@@ -131,9 +132,13 @@ def _wire_ai_to_camera_manager():
     intent from a real camera flows through YOLOv8 → behavior analyzer
     → handle_detection → scoring / alerts / WebSocket.
     """
-    from app.services.ai_inference import get_or_create_processor
+    from app.services.ai_inference import get_or_create_processor, ZoneConfig
+    from collections import defaultdict
 
-    _callback_fire_count = {"n": 0}
+    # Per-camera, not global — with multiple cameras a single flat counter
+    # would only ever log "first 3 frames" for whichever camera happens to
+    # fire first, leaving every other camera's startup silent.
+    _callback_fire_count = defaultdict(int)
 
     async def _ai_frame_callback(frame_payload: dict):
         """
@@ -146,17 +151,25 @@ def _wire_ai_to_camera_manager():
             logger.warning(f"[{camera_id}] _ai_frame_callback: frame is None in payload!")
             return
 
-        _callback_fire_count["n"] += 1
-        n = _callback_fire_count["n"]
+        _callback_fire_count[camera_id] += 1
+        n = _callback_fire_count[camera_id]
 
-        # Log the first 3 frames so we know data is flowing
+        # Log the first 3 frames per camera so we know data is flowing from EACH one
         if n <= 3:
             logger.info(
                 f"📡 AI frame callback firing (#{n}): camera={camera_id} "
                 f"frame_shape={frame.shape if hasattr(frame, 'shape') else 'unknown'}"
             )
 
-        processor = get_or_create_processor(camera_id, handle_detection)
+        # Per-camera zone thresholds — configured in cameras.yaml under
+        # `extra: {zones: {...}}`. Falls back to store-layout defaults.
+        stream = camera_manager.get_stream(camera_id)
+        zones_dict = (stream.cfg.extra or {}).get("zones") if stream else None
+        zones = ZoneConfig.from_dict(zones_dict)
+        if n == 1 and zones_dict:
+            logger.info(f"[{camera_id}] Using custom zone config: {zones_dict}")
+
+        processor = get_or_create_processor(camera_id, handle_detection, zones)
         await processor.on_frame(frame)
 
     camera_manager.register_frame_callback(_ai_frame_callback)
@@ -189,6 +202,35 @@ def _schedule_reports():
         )
     except Exception as e:
         logger.warning(f"Could not schedule reports: {e}")
+
+
+def _schedule_retention():
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from app.core.database import AsyncSessionLocal
+        from app.services.retention import purge_expired_data
+
+        scheduler = AsyncIOScheduler()
+
+        async def _run_purge():
+            async with AsyncSessionLocal() as db:
+                await purge_expired_data(db)
+
+        scheduler.add_job(
+            _run_purge,
+            "cron",
+            hour=settings.RETENTION_PURGE_HOUR,
+            minute=settings.RETENTION_PURGE_MINUTE,
+            id="data_retention_purge",
+        )
+        scheduler.start()
+        logger.info(
+            f"Data retention purge scheduled daily at "
+            f"{settings.RETENTION_PURGE_HOUR:02d}:{settings.RETENTION_PURGE_MINUTE:02d} UTC "
+            f"(tracking data: {settings.DATA_RETENTION_DAYS}d, alerts: {settings.ALERT_RETENTION_DAYS}d)"
+        )
+    except Exception as e:
+        logger.warning(f"Could not schedule retention purge: {e}")
 
 
 # ── App factory ────────────────────────────────────────────────────────────────
@@ -273,6 +315,8 @@ app.include_router(analytics.router,  prefix="/api")
 app.include_router(cameras.router,    prefix="/api")
 app.include_router(cameras.ws_router)
 app.include_router(events.router,     prefix="/api")
+app.include_router(sensors.router,    prefix="/api")
+app.include_router(admin.router,      prefix="/api")
 app.include_router(auth.router,       prefix="/api")
 
 

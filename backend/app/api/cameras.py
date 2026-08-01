@@ -100,7 +100,7 @@ async def debug_ai():
     from app.core.config import settings
     from app.camera.camera_manager import camera_manager
     from app.services.ai_inference import (
-        YOLOInferenceEngine, _processors, is_model_loaded, get_active_person_count
+        YOLOInferenceEngine, _processors, is_model_loaded, get_active_person_count, get_pose_stats
     )
 
     cam_infos = camera_manager.get_all_info()
@@ -132,6 +132,7 @@ async def debug_ai():
         ],
         "ai_processors":    processors_info,
         "active_persons_ai": get_active_person_count(),
+        "pose_stats":       get_pose_stats(),
         "pipeline_sim_running": pipeline._running,
         "diagnosis": _build_diagnosis(settings, is_model_loaded(), cam_infos, processors_info),
     }
@@ -161,44 +162,6 @@ def _build_diagnosis(settings, model_loaded: bool, cam_infos: list, processors: 
     if not issues:
         issues.append("✅ All systems nominal — detections should be flowing")
     return issues
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Simulated pipeline feeds
-# Both paths registered: /api/cameras/feeds (new) + /cameras/feeds (legacy)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-async def _camera_feeds_handler():
-    sim_feeds = pipeline.get_camera_frames()
-    real_cams = _cam().get_all_info()
-    return {
-        "feeds":          sim_feeds,
-        "active_persons": pipeline.get_active_count(),
-        "real_cameras":   real_cams,
-    }
-
-@router.get("/cameras/feeds")
-async def camera_feeds():
-    return await _camera_feeds_handler()
-
-@ws_router.get("/cameras/feeds")       # legacy path without /api prefix
-async def camera_feeds_legacy():
-    return await _camera_feeds_handler()
-
-
-async def _single_feed_handler(camera_id: int):
-    for f in pipeline.get_camera_frames():
-        if f["camera_id"] == camera_id:
-            return f
-    return {"camera_id": camera_id, "persons": [], "person_count": 0}
-
-@router.get("/cameras/{camera_id}/feed")
-async def single_camera_feed(camera_id: int):
-    return await _single_feed_handler(camera_id)
-
-@ws_router.get("/cameras/{camera_id}/feed")   # legacy path
-async def single_camera_feed_legacy(camera_id: int):
-    return await _single_feed_handler(camera_id)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -234,6 +197,97 @@ async def get_camera(camera_id: str):
     if info is None:
         raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
     return info
+
+
+# ── Zone calibration ─────────────────────────────────────────────────────────
+# Behavior-zone thresholds (register/exit/shelf boundaries) as fractions of
+# frame width/height. These drive PICK_ITEM zone gating, BYPASS_REGISTER,
+# and EXIT_STORE — see app/services/ai_inference.py ZoneConfig.
+
+class ZoneUpdateRequest(BaseModel):
+    shelf_zone_x:     list[float] = Field(..., min_length=2, max_length=2)
+    shelf_zone_y_max: float       = Field(..., ge=0.0, le=1.0)
+    register_zone_x:  list[float] = Field(..., min_length=2, max_length=2)
+    exit_zone_x:      float       = Field(..., ge=0.0, le=1.0)
+
+
+@router.get("/cameras/{camera_id}/zones")
+async def get_camera_zones(camera_id: str):
+    """Current effective zone thresholds for a camera (defaults if never calibrated)."""
+    from app.services.ai_inference import ZoneConfig
+    stream = _cam().get_stream(camera_id)
+    if stream is None:
+        raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
+    zones_dict = (stream.cfg.extra or {}).get("zones")
+    cfg = ZoneConfig.from_dict(zones_dict)
+    return {
+        "camera_id": camera_id,
+        "shelf_zone_x":     list(cfg.shelf_zone_x),
+        "shelf_zone_y_max": cfg.shelf_zone_y_max,
+        "register_zone_x":  list(cfg.register_zone_x),
+        "exit_zone_x":      cfg.exit_zone_x,
+        "is_default": zones_dict is None,
+    }
+
+
+@router.put("/cameras/{camera_id}/zones")
+async def update_camera_zones(camera_id: str, req: ZoneUpdateRequest):
+    """
+    Save calibrated zone thresholds for a camera. Persisted to
+    data/camera_zones.json and applied on next backend restart — the
+    currently-running AI processor doesn't hot-reload (it's constructed once
+    at first frame), so this does NOT take effect immediately.
+    """
+    from app.camera.camera_manager import save_zone_override
+    if _cam().get_stream(camera_id) is None:
+        raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
+
+    zones = {
+        "shelf_zone_x":     req.shelf_zone_x,
+        "shelf_zone_y_max": req.shelf_zone_y_max,
+        "register_zone_x":  req.register_zone_x,
+        "exit_zone_x":      req.exit_zone_x,
+    }
+    save_zone_override(camera_id, zones)
+    return {"saved": True, "camera_id": camera_id, "zones": zones, "restart_required": True}
+
+
+# ── Zone labels — business-facing names ("Hair Products") instead of the
+# internal zone codes ("AISLE_A"). Purely a display concern: doesn't touch
+# detection behavior, takes effect immediately (no restart needed), unlike
+# the zone thresholds above. ──────────────────────────────────────────────────
+
+class ZoneLabelsRequest(BaseModel):
+    labels: Dict[str, str] = Field(
+        default_factory=dict,
+        description='Maps zone code -> business name, e.g. {"AISLE_A": "Hair Products"}',
+    )
+
+
+@router.get("/cameras/{camera_id}/zone-labels")
+async def get_camera_zone_labels(camera_id: str):
+    from app.camera.camera_manager import get_zone_labels, KNOWN_ZONE_CODES
+    if _cam().get_stream(camera_id) is None:
+        raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
+    return {
+        "camera_id": camera_id,
+        "zone_codes": KNOWN_ZONE_CODES,
+        "labels": get_zone_labels(camera_id),
+    }
+
+
+@router.put("/cameras/{camera_id}/zone-labels")
+async def update_camera_zone_labels(camera_id: str, req: ZoneLabelsRequest):
+    from app.camera.camera_manager import save_zone_labels, KNOWN_ZONE_CODES
+    if _cam().get_stream(camera_id) is None:
+        raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
+
+    unknown = set(req.labels.keys()) - set(KNOWN_ZONE_CODES)
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unknown zone code(s): {sorted(unknown)}. Valid: {KNOWN_ZONE_CODES}")
+
+    save_zone_labels(camera_id, req.labels)
+    return {"saved": True, "camera_id": camera_id, "labels": req.labels}
 
 
 # Valid camera types

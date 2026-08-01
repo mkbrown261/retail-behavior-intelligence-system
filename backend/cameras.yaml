@@ -20,12 +20,46 @@ cameras:
     width:     1280
     height:    720
     fps:       30
+    # Behavior-zone thresholds, as a fraction of frame width/height (0.0-1.0).
+    # Defaults below assume a real store aisle mapped left-to-right; if this
+    # camera is pointed at a desk/room rather than a shelf-to-exit layout,
+    # adjust these to match what's actually in frame, or events like
+    # PICK_ITEM/BYPASS_REGISTER will fire based on the wrong geometry.
+    # Desk/close-up test setup: person fills most of the frame, so the
+    # store-aisle defaults (exit at x>0.85) fire on a normal reach/step.
+    # Widened shelf zone to the full frame and pushed exit/register out to
+    # the edges so tracking survives a pick-and-pocket motion without a
+    # false EXIT_STORE killing the track mid-gesture.
+    extra:
+      zones:
+        shelf_zone_x:     [0.0, 1.0]
+        shelf_zone_y_max: 1.0
+        register_zone_x:  [0.0, 0.05]
+        exit_zone_x:      0.97
+        # Staff detection — same signal class as everything else this system
+        # tracks (color, not identity). If a tracked person's measured torso
+        # color matches one of these hex values within staff_color_tolerance
+        # (max RGB distance, default 45), they're auto-classified STAFF and
+        # skip suspicion scoring. This is a soft signal — a customer wearing
+        # a similar-colored shirt will false-match. For an authoritative
+        # override, use the Sensor Bus STAFF_BADGE_SCAN event instead
+        # (POST /api/sensors/event) — e.g. from an employee badge reader.
+        # staff_uniform_colors:  ["#1A3C6E"]   # e.g. navy blue polo
+        # staff_color_tolerance: 45
 
+  # ── Second USB camera — multi-camera stress test ───────────────────────────
+  # Uncomment to enable. `source: 1` is the second USB video device macOS
+  # enumerates (0 is usually the built-in/primary webcam already in use
+  # above). If this doesn't find the right camera, try 2, 3, etc. — index
+  # assignment isn't guaranteed stable across reboots/unplugs on macOS.
+  # No zone calibration below on purpose — use the dashboard's Zone Editor
+  # (Cameras tab -> 📐 Zones button) once this camera is live and pointed
+  # where you want it, rather than guessing coordinates blind.
   # - camera_id: usb_cam_1
   #   cam_type:  USB
   #   source:    1
-  #   width:     1920
-  #   height:    1080
+  #   width:     1280
+  #   height:    720
   #   fps:       30
 
   # ── RTSP / IP camera examples ─────────────────────────────────────────────

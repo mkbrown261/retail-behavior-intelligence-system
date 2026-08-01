@@ -16,6 +16,10 @@ const EVENT_ICONS = {
   APPROACH_REGISTER: '🏧',
   COMPLETE_CHECKOUT: '✅',
   BYPASS_REGISTER:   '🚨',
+  CONCEALMENT:       '🕵️',
+  SHELF_REVISIT:     '🔁',
+  EXTENDED_DWELL:    '⏱️',
+  COLOR_DISAPPEARANCE: '🎨',
 }
 
 const EVENT_COLORS = {
@@ -27,14 +31,17 @@ const EVENT_COLORS = {
   APPROACH_REGISTER: '#bc8cff',
   COMPLETE_CHECKOUT: '#3fb950',
   BYPASS_REGISTER:   '#f85149',
+  CONCEALMENT:       '#f85149',
+  SHELF_REVISIT:     '#d29922',
+  EXTENDED_DWELL:    '#d29922',
+  COLOR_DISAPPEARANCE: '#f85149',
 }
 
 function TimelineItem({ item }) {
-  const isEvent = item.kind === 'EVENT'
   const data = item.data
   const ts = data.timestamp ? format(new Date(data.timestamp), 'HH:mm:ss') : ''
 
-  if (!isEvent) {
+  if (item.kind === 'SCORE') {
     return (
       <div className="flex items-center gap-2 pl-2 border-l border-rbis-600 py-1">
         <span className="w-2 h-2 bg-rbis-600 rounded-full flex-shrink-0" />
@@ -43,6 +50,31 @@ function TimelineItem({ item }) {
         <span className={`text-xs font-mono ${data.delta > 0 ? 'text-red-400' : 'text-green-400'}`}>
           {data.delta > 0 ? `+${data.delta}` : data.delta}
         </span>
+      </div>
+    )
+  }
+
+  if (item.kind === 'SENSOR') {
+    const p = data.payload || {}
+    const label = p.item_name
+      ? `${p.item_name}${p.sku ? ` (SKU ${p.sku})` : ''}${p.price ? ` — $${p.price}` : ''}`
+      : data.event_type
+    return (
+      <div className="flex items-start gap-3 py-1.5">
+        <div className="flex flex-col items-center flex-shrink-0">
+          <div className="w-7 h-7 rounded flex items-center justify-center text-sm"
+            style={{ background: '#3fb95022', border: '1px solid #3fb95055' }}>
+            📦
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold" style={{ color: '#3fb950' }}>{data.event_type}</span>
+            <span className="text-xs bg-rbis-700 text-rbis-400 px-1 rounded">{data.sensor_type}</span>
+            <span className="text-xs text-rbis-600">{ts}</span>
+          </div>
+          <p className="text-xs text-rbis-400 mt-0.5">{label}</p>
+        </div>
       </div>
     )
   }
@@ -65,7 +97,7 @@ function TimelineItem({ item }) {
           </span>
           <span className="text-xs text-rbis-500">
             <Camera size={10} className="inline mr-0.5" />
-            CAM {data.camera_id + 1}
+            {data.camera_id}
           </span>
           {data.zone && (
             <span className="text-xs bg-rbis-700 text-rbis-400 px-1 rounded">{data.zone}</span>
@@ -81,6 +113,78 @@ function TimelineItem({ item }) {
           <p className="text-xs text-rbis-600 mt-0.5">
             Confidence: {(data.confidence * 100).toFixed(0)}%
           </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+const FACTOR_LABELS = {
+  motion_pattern:       'Motion Pattern',
+  object_interaction:   'Object Interaction',
+  concealment_evidence: 'Concealment Evidence',
+  color_disappearance:  'Color Disappearance',
+  exit_behavior:        'Exit Behavior',
+  employee_presence:    'Employee Presence',
+}
+
+function ConfidenceBreakdown({ personId }) {
+  const [conf, setConf] = useState(null)
+
+  useEffect(() => {
+    if (!personId) return
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await personAPI.confidence(personId)
+        if (!cancelled) setConf(res.data)
+      } catch (_) {
+        if (!cancelled) setConf(null)
+      }
+    }
+    load()
+    const t = setInterval(load, 3000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [personId])
+
+  if (!conf?.available) return null
+
+  return (
+    <div className="card">
+      <p className="text-sm font-semibold text-rbis-200 mb-1 flex items-center gap-2">
+        <Zap size={14} className="text-accent-blue" />
+        Incident Confidence — {conf.overall_confidence}%
+      </p>
+      <p className="text-xs mb-3" style={{ color: conf.overall_confidence >= 75 ? '#f85149' : conf.overall_confidence >= 40 ? '#d29922' : '#3fb950' }}>
+        {conf.recommendation}
+      </p>
+      <div className="space-y-1.5">
+        {Object.entries(conf.factors).map(([key, val]) => (
+          <div key={key} className="flex items-center gap-2">
+            <span className="text-xs text-rbis-400 w-40 flex-shrink-0">{FACTOR_LABELS[key] || key}</span>
+            <div className="flex-1 h-2 bg-rbis-700 rounded overflow-hidden relative">
+              <div
+                className="h-full rounded"
+                style={{
+                  width: `${Math.min(100, Math.abs(val))}%`,
+                  background: val < 0 ? '#3fb950' : '#f85149',
+                  marginLeft: val < 0 ? 'auto' : 0,
+                }}
+              />
+            </div>
+            <span className={`text-xs font-mono w-12 text-right ${val < 0 ? 'text-green-400' : 'text-rbis-300'}`}>
+              {val > 0 ? '+' : ''}{val}%
+            </span>
+          </div>
+        ))}
+        {conf.corroboration_bonus > 0 && (
+          <div className="flex items-center gap-2 pt-1.5 mt-1 border-t border-rbis-700">
+            <span className="text-xs text-rbis-300 w-40 flex-shrink-0 font-semibold">🔗 Signals Corroborated</span>
+            <span className="text-xs text-rbis-500 flex-1">Hand kinematics + item color agree</span>
+            <span className="text-xs font-mono w-12 text-right text-red-400 font-semibold">
+              +{conf.corroboration_bonus}%
+            </span>
+          </div>
         )}
       </div>
     </div>
@@ -163,6 +267,9 @@ export default function PersonTimeline({ personId, onClose }) {
             <div className="flex justify-center py-12"><Spinner size={32} /></div>
           ) : (
             <>
+              {/* Incident Confidence breakdown */}
+              <ConfidenceBreakdown personId={personId} />
+
               {/* Score chart */}
               {scoreData.length > 1 && (
                 <div className="card">
@@ -197,17 +304,19 @@ export default function PersonTimeline({ personId, onClose }) {
                 </div>
               )}
 
-              {/* Event timeline */}
+              {/* Event timeline — camera events + sensor events (e.g. RFID item
+                  reads) interleaved chronologically so a reviewer sees what
+                  happened and, when available, what was actually picked up */}
               <div className="card">
                 <p className="text-sm font-semibold text-rbis-200 mb-3 flex items-center gap-2">
                   <Clock size={14} className="text-accent-blue" />
-                  Event Timeline ({data?.event_count || 0} events)
+                  Event Timeline ({data?.event_count || 0} events{data?.sensor_events ? `, ${data.sensor_events} sensor` : ''})
                 </p>
                 <div className="space-y-0.5 divide-y divide-rbis-700/50">
-                  {timeline.filter(t => t.kind === 'EVENT').map((item, i) => (
+                  {timeline.filter(t => t.kind === 'EVENT' || t.kind === 'SENSOR').map((item, i) => (
                     <TimelineItem key={i} item={item} />
                   ))}
-                  {timeline.filter(t => t.kind === 'EVENT').length === 0 && (
+                  {timeline.filter(t => t.kind === 'EVENT' || t.kind === 'SENSOR').length === 0 && (
                     <p className="text-xs text-rbis-500 py-4 text-center">No events recorded</p>
                   )}
                 </div>

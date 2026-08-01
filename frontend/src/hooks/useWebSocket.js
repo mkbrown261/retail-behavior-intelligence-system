@@ -13,13 +13,14 @@ function getDelay(attempt) {
   return Math.min(3000 * Math.pow(2, attempt), 30000)
 }
 
-export function useWebSocket(topics = ['detections', 'alerts', 'scores', 'cameras']) {
+export function useWebSocket(topics = ['detections', 'alerts', 'scores', 'cameras', 'pose']) {
   const wsRef = useRef(null)
   const [connected, setConnected] = useState(false)
   const [lastDetection, setLastDetection] = useState(null)
   const [lastAlert, setLastAlert] = useState(null)
   const [lastScore, setLastScore] = useState(null)
   const [cameraFrame, setCameraFrame] = useState(null)
+  const [lastPose, setLastPose] = useState(null)
   const reconnectTimer = useRef(null)
   const attemptRef = useRef(0)
   const unmountedRef = useRef(false)
@@ -73,6 +74,9 @@ export function useWebSocket(topics = ['detections', 'alerts', 'scores', 'camera
           case 'new_alert':
             setLastAlert(msg.alert)
             break
+          case 'pose_update':
+            setLastPose(msg)
+            break
           default:
             break
         }
@@ -93,5 +97,5 @@ export function useWebSocket(topics = ['detections', 'alerts', 'scores', 'camera
     }
   }, [connect])
 
-  return { connected, lastDetection, lastAlert, lastScore, cameraFrame }
+  return { connected, lastDetection, lastAlert, lastScore, cameraFrame, lastPose }
 }

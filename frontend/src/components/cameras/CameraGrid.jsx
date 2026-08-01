@@ -1,10 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { cameraAPI } from '../../utils/api'
-import api from '../../utils/api'
-// Snapshot URL helper — uses the baked-in backend URL
-const BACKEND = import.meta.env.VITE_API_URL || ''
 
-const CAMERA_NAMES = ['Entrance', 'Aisle A', 'Aisle B', 'Aisle C', 'Checkout/Exit']
+const BACKEND = import.meta.env.VITE_API_URL || ''
 const LEVEL_COLORS = { NORMAL: '#3fb950', WATCH: '#d29922', HIGH_SUSPICION: '#f85149' }
 
 const STATUS_COLOR = {
@@ -17,84 +14,107 @@ const STATUS_COLOR = {
   IDLE:         'bg-gray-500',
 }
 
-// ── Simulated-pipeline canvas feed ──────────────────────────────────────────
+// COCO keypoint indices (yolov8-pose): 5/6 shoulders, 7/8 elbows, 9/10 wrists, 11/12 hips
+const SKELETON_EDGES = [[5,7],[7,9],[6,8],[8,10],[5,6],[5,11],[6,12],[11,12]]
+const WRIST_INDICES  = [9, 10]
+const KP_CONF_MIN     = 0.3
 
-function CameraFeed({ feed, livePersons = [] }) {
+// ── Pose skeleton overlay — visible proof the model is tracking hands, not
+// just a body box. Draws shoulder→elbow→wrist limbs with wrists highlighted
+// as large dots, from live keypoints broadcast every processed frame. ──────
+
+function PoseSkeletonOverlay({ poses, imgSize }) {
   const canvasRef = useRef(null)
-  const persons   = livePersons.filter(p => p.camera_id === feed.camera_id)
 
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas) return
+    if (!canvas || !imgSize.w) return
+    canvas.width = imgSize.w
+    canvas.height = imgSize.h
     const ctx = canvas.getContext('2d')
-    const W = canvas.width, H = canvas.height
+    ctx.clearRect(0, 0, imgSize.w, imgSize.h)
 
-    ctx.fillStyle = '#0d1117'
-    ctx.fillRect(0, 0, W, H)
+    if (!poses || poses.length === 0) return
 
-    ctx.strokeStyle = '#21262d'; ctx.lineWidth = 0.5
-    for (let x = 0; x < W; x += W / 6) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke() }
-    for (let y = 0; y < H; y += H / 4) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke() }
-    for (let y = 0; y < H; y += 4)     { ctx.fillStyle = 'rgba(0,0,0,0.08)'; ctx.fillRect(0,y,W,2) }
+    for (const person of poses) {
+      const kp = person.keypoints
+      if (!kp) continue
+      const pt = i => (kp[i] && kp[i][2] >= KP_CONF_MIN)
+        ? [kp[i][0] * imgSize.w, kp[i][1] * imgSize.h]
+        : null
 
-    ctx.fillStyle = 'rgba(88,166,255,0.08)'
-    ctx.font = 'bold 48px monospace'; ctx.textAlign = 'center'
-    ctx.fillText(`CAM ${feed.camera_id + 1}`, W / 2, H / 2 + 16)
-
-    persons.forEach(p => {
-      if (!p.bbox) return
-      const [x1,y1,x2,y2] = p.bbox
-      const px=x1*W, py=y1*H, pw=(x2-x1)*W, ph=(y2-y1)*H
-      const color = p.is_staff ? '#3b82f6' : (LEVEL_COLORS[p.level] || '#3fb950')
-      ctx.strokeStyle = color; ctx.lineWidth = 2
-      ctx.strokeRect(px,py,pw,ph)
-      const cLen=8; ctx.lineWidth=3
-      ;[[px,py],[px+pw,py],[px,py+ph],[px+pw,py+ph]].forEach(([cx,cy],i)=>{
-        const dx=i%2===1?-cLen:cLen, dy=i>=2?-cLen:cLen
-        ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx+dx,cy)
-        ctx.moveTo(cx,cy); ctx.lineTo(cx,cy+dy); ctx.stroke()
-      })
-      const label = p.is_staff ? 'STAFF' : `${p.session_id} ${p.score?p.score.toFixed(0):0}%`
-      ctx.font='bold 11px monospace'
-      const tw=ctx.measureText(label).width+8
-      ctx.fillStyle='rgba(13,17,23,0.85)'; ctx.fillRect(px,py-18,tw,16)
-      ctx.fillStyle=color; ctx.fillText(label,px+4,py-5)
-      if (!p.is_staff && p.score) {
-        const barW=pw*(Math.min(100,p.score)/100)
-        ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fillRect(px,py+ph-4,pw,4)
-        ctx.fillStyle=color;              ctx.fillRect(px,py+ph-4,barW,4)
+      // Limbs
+      ctx.strokeStyle = '#58a6ff'
+      ctx.lineWidth = 2
+      for (const [a, b] of SKELETON_EDGES) {
+        const pa = pt(a), pb = pt(b)
+        if (pa && pb) {
+          ctx.beginPath()
+          ctx.moveTo(pa[0], pa[1])
+          ctx.lineTo(pb[0], pb[1])
+          ctx.stroke()
+        }
       }
-    })
 
-    ctx.fillStyle='rgba(88,166,255,0.7)'; ctx.font='10px monospace'
-    ctx.textAlign='left';  ctx.fillText(new Date().toLocaleTimeString(),6,H-6)
-    ctx.textAlign='right'; ctx.fillText(`${persons.length} tracked`,W-6,H-6)
-  }, [feed, persons])
+      // Joints (small)
+      ctx.fillStyle = '#58a6ff'
+      for (let i = 5; i <= 12; i++) {
+        const p = pt(i)
+        if (p) {
+          ctx.beginPath()
+          ctx.arc(p[0], p[1], 3, 0, Math.PI * 2)
+          ctx.fill()
+        }
+      }
+
+      // Wrists — large highlighted dots, the whole point of this overlay
+      for (const idx of WRIST_INDICES) {
+        const p = pt(idx)
+        if (p) {
+          ctx.fillStyle = '#3fb950'
+          ctx.beginPath()
+          ctx.arc(p[0], p[1], 7, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.strokeStyle = '#0d1117'
+          ctx.lineWidth = 1.5
+          ctx.stroke()
+        }
+      }
+    }
+  }, [poses, imgSize])
 
   return (
-    <div className="camera-feed group">
-      <canvas ref={canvasRef} width={320} height={180} className="w-full h-full object-cover"/>
-      <div className="camera-label absolute bottom-0 left-0 right-0 px-2 py-1.5 flex justify-between items-center">
-        <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 bg-accent-green rounded-full animate-pulse"/>
-          <span className="text-xs font-semibold text-white">
-            CAM {feed.camera_id+1} — {CAMERA_NAMES[feed.camera_id]||'Camera'}
-          </span>
-        </div>
-        <span className="text-xs text-rbis-400">{persons.length} person{persons.length!==1?'s':''}</span>
-      </div>
-      {persons.some(p=>p.level==='HIGH_SUSPICION') && (
-        <div className="absolute inset-0 border-2 border-red-500 rounded pointer-events-none animate-pulse"/>
-      )}
-    </div>
+    <canvas
+      ref={canvasRef}
+      className="absolute inset-0 w-full h-full pointer-events-none"
+    />
   )
 }
 
-// ── Real-camera status card ─────────────────────────────────────────────────
+// ── Real camera card: live snapshot + bbox + pose skeleton overlay ──────────
 
-function RealCameraCard({ cam, onRemove, onRestart }) {
+function RealCameraCard({ cam, livePersons, poses, onRemove, onRestart }) {
   const statusDot = STATUS_COLOR[cam.status] || 'bg-gray-500'
   const isLive    = cam.status === 'CONNECTED'
+  const imgRef    = useRef(null)
+  const [imgSize, setImgSize] = useState({ w: 0, h: 0 })
+
+  const persons = livePersons.filter(p => p.camera_id === cam.camera_id)
+
+  // Measure the rendered image box on mount/resize — MJPEG multipart streams
+  // don't reliably re-fire onLoad per frame, but the box itself is CSS-sized
+  // (fixed height, w-full) so it's stable regardless of stream content.
+  useEffect(() => {
+    if (!isLive) return
+    const measure = () => {
+      if (imgRef.current) {
+        setImgSize({ w: imgRef.current.clientWidth, h: imgRef.current.clientHeight })
+      }
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [isLive])
 
   return (
     <div className="card p-3 flex flex-col gap-2 min-w-0">
@@ -120,15 +140,44 @@ function RealCameraCard({ cam, onRemove, onRestart }) {
       <div className="flex justify-between text-xs text-rbis-400">
         <span>{cam.resolution?`${cam.resolution[0]}×${cam.resolution[1]}`:'—'}</span>
         <span>{isLive ? `${cam.fps_actual} fps · ${cam.frames_total} frames` : cam.status}</span>
+        <span>{persons.length} person{persons.length!==1?'s':''}</span>
       </div>
       {isLive && (
-        <img
-          src={`${BACKEND}/api/cameras/${cam.camera_id}/snapshot?quality=50&t=${Date.now()}`}
-          alt={cam.camera_id}
-          className="w-full rounded border border-rbis-700 object-cover"
-          style={{ height: 90 }}
-          onError={e => { e.target.style.display='none' }}
-        />
+        <div className="relative w-full rounded border border-rbis-700 overflow-hidden" style={{ height: 220 }}>
+          <img
+            ref={imgRef}
+            src={`${BACKEND}/api/cameras/${cam.camera_id}/mjpeg`}
+            alt={cam.camera_id}
+            className="w-full h-full object-cover"
+            onLoad={e => setImgSize({ w: e.target.clientWidth, h: e.target.clientHeight })}
+            onError={e => { e.target.style.display='none' }}
+          />
+          <PoseSkeletonOverlay poses={poses} imgSize={imgSize} />
+          {imgSize.w > 0 && persons.map(p => {
+            if (!p.bbox) return null
+            const [x1,y1,x2,y2] = p.bbox
+            const left = x1 * imgSize.w, top = y1 * imgSize.h
+            const w = (x2-x1) * imgSize.w, h = (y2-y1) * imgSize.h
+            const color = p.is_staff ? '#3b82f6' : (LEVEL_COLORS[p.level] || '#3fb950')
+            return (
+              <div
+                key={p.session_id}
+                className="absolute pointer-events-none"
+                style={{ left, top, width: w, height: h, border: `2px solid ${color}` }}
+              >
+                <span
+                  className="absolute -top-5 left-0 px-1 text-[10px] font-mono font-bold whitespace-nowrap"
+                  style={{ background: 'rgba(13,17,23,0.85)', color }}
+                >
+                  {p.is_staff ? 'STAFF' : `${p.session_id} ${p.score ? Math.round(p.score) : 0}%`}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {persons.some(p=>p.level==='HIGH_SUSPICION') && (
+        <div className="absolute inset-0 border-2 border-red-500 rounded pointer-events-none animate-pulse"/>
       )}
     </div>
   )
@@ -138,7 +187,7 @@ function RealCameraCard({ cam, onRemove, onRestart }) {
 
 function AddCameraModal({ onAdd, onClose }) {
   const [form, setForm] = useState({
-    camera_id:'', cam_type:'MOCK', source:'mock://0',
+    camera_id:'', cam_type:'USB', source:'0',
     width:1280, height:720, fps:15, username:'', password:''
   })
   const [error, setError] = useState('')
@@ -164,7 +213,7 @@ function AddCameraModal({ onAdd, onClose }) {
               onChange={e=>setForm({...form,camera_id:e.target.value})}/>
             <select className="input w-28" value={form.cam_type}
               onChange={e=>setForm({...form,cam_type:e.target.value})}>
-              {['MOCK','USB','RTSP','HTTP','ONVIF','FILE'].map(t=><option key={t}>{t}</option>)}
+              {['USB','RTSP','HTTP','ONVIF','FILE'].map(t=><option key={t}>{t}</option>)}
             </select>
           </div>
           <input required className="input" placeholder="source  (e.g. 0 / rtsp://...)" value={form.source}
@@ -196,21 +245,9 @@ function AddCameraModal({ onAdd, onClose }) {
 
 // ── Main CameraGrid ─────────────────────────────────────────────────────────
 
-export default function CameraGrid({ livePersons = [], cameraFrame }) {
-  const [feeds, setFeeds]         = useState(() =>
-    Array.from({length:5},(_,i)=>({camera_id:i,persons:[],person_count:0}))
-  )
-  const [realCams, setRealCams]   = useState([])
-  const [showAdd,  setShowAdd]    = useState(false)
-  const [showReal, setShowReal]   = useState(false)
-
-  const refreshFeeds = useCallback(async () => {
-    try {
-      const res = await cameraAPI.feeds()
-      if (res.data?.feeds)       setFeeds(res.data.feeds)
-      if (res.data?.real_cameras) setRealCams(res.data.real_cameras)
-    } catch (_) {}
-  }, [])
+export default function CameraGrid({ livePersons = [], posesByCamera = {} }) {
+  const [realCams, setRealCams] = useState([])
+  const [showAdd,  setShowAdd]  = useState(false)
 
   const refreshReal = useCallback(async () => {
     try {
@@ -220,18 +257,10 @@ export default function CameraGrid({ livePersons = [], cameraFrame }) {
   }, [])
 
   useEffect(() => {
-    refreshFeeds()
-    const t = setInterval(refreshFeeds, 3000)
-    return () => clearInterval(t)
-  }, [refreshFeeds])
-
-  // Auto-refresh real-camera snapshots every 2 s when panel is open
-  useEffect(() => {
-    if (!showReal) return
     refreshReal()
     const t = setInterval(refreshReal, 2000)
     return () => clearInterval(t)
-  }, [showReal, refreshReal])
+  }, [refreshReal])
 
   const handleRemove = async (id) => {
     try { await cameraAPI.remove(id); refreshReal() } catch(_) {}
@@ -242,48 +271,34 @@ export default function CameraGrid({ livePersons = [], cameraFrame }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Simulated pipeline grid */}
-      <div className="grid grid-cols-3 gap-2">
-        {feeds.map(feed => (
-          <CameraFeed key={feed.camera_id} feed={feed} livePersons={livePersons}/>
-        ))}
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-rbis-200 uppercase tracking-wider flex items-center gap-1.5">
+          <span className={`w-2 h-2 rounded-full ${realCams.length > 0 ? 'bg-green-500' : 'bg-gray-500'}`}/>
+          Cameras ({realCams.length})
+        </span>
+        <button onClick={() => setShowAdd(true)} className="btn-primary text-xs px-3 py-1">
+          + Add Camera
+        </button>
       </div>
 
-      {/* Real cameras panel toggle */}
-      <div className="flex items-center justify-between">
-        <button
-          onClick={() => setShowReal(v => !v)}
-          className="btn-ghost text-xs flex items-center gap-1.5"
-        >
-          <span className={`w-2 h-2 rounded-full ${realCams.length > 0 ? 'bg-green-500' : 'bg-gray-500'}`}/>
-          Real Cameras ({realCams.length})
-          <span className="ml-1 text-rbis-500">{showReal ? '▲' : '▼'}</span>
-        </button>
-        {showReal && (
-          <button onClick={() => setShowAdd(true)} className="btn-primary text-xs px-3 py-1">
-            + Add Camera
-          </button>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {realCams.length === 0 ? (
+          <p className="text-rbis-500 text-sm col-span-2 text-center py-4">
+            No cameras configured. Add one above or edit cameras.yaml on the server.
+          </p>
+        ) : (
+          realCams.map(cam => (
+            <RealCameraCard
+              key={cam.camera_id}
+              cam={cam}
+              livePersons={livePersons}
+              poses={posesByCamera[cam.camera_id] || []}
+              onRemove={handleRemove}
+              onRestart={handleRestart}
+            />
+          ))
         )}
       </div>
-
-      {showReal && (
-        <div className="grid grid-cols-2 gap-2">
-          {realCams.length === 0 ? (
-            <p className="text-rbis-500 text-sm col-span-2 text-center py-4">
-              No cameras configured. Add one or edit cameras.yaml on the server.
-            </p>
-          ) : (
-            realCams.map(cam => (
-              <RealCameraCard
-                key={cam.camera_id}
-                cam={cam}
-                onRemove={handleRemove}
-                onRestart={handleRestart}
-              />
-            ))
-          )}
-        </div>
-      )}
 
       {showAdd && (
         <AddCameraModal onAdd={refreshReal} onClose={() => setShowAdd(false)}/>

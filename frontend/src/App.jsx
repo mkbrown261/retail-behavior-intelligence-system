@@ -2,20 +2,22 @@ import React from 'react'
 import { Routes, Route, NavLink } from 'react-router-dom'
 import LiveDashboard from './pages/LiveDashboard'
 import AnalyticsDashboard from './pages/AnalyticsDashboard'
+import StoreHealthPage from './pages/StoreHealthPage'
 import PersonsPage from './pages/PersonsPage'
 import CamerasPage from './pages/CamerasPage'
 import SetupGuidePage from './pages/SetupGuidePage'
 import ErrorBoundary from './components/ErrorBoundary'
 import {
-  Monitor, BarChart2, Users, Shield, Eye, AlertTriangle, Camera, BookOpen
+  Monitor, BarChart2, Users, Shield, Eye, AlertTriangle, Camera, BookOpen, HeartPulse
 } from 'lucide-react'
 
 const NAV = [
-  { to: '/',          label: 'Live',       icon: Monitor   },
-  { to: '/analytics', label: 'Analytics',  icon: BarChart2 },
-  { to: '/persons',   label: 'Persons',    icon: Users     },
-  { to: '/cameras',   label: 'Cameras',    icon: Camera    },
-  { to: '/setup',     label: 'Setup',      icon: BookOpen  },
+  { to: '/',             label: 'Live',         icon: Monitor    },
+  { to: '/store-health', label: 'Store Health', icon: HeartPulse },
+  { to: '/analytics',    label: 'Analytics',    icon: BarChart2  },
+  { to: '/persons',      label: 'Persons',      icon: Users      },
+  { to: '/cameras',      label: 'Cameras',      icon: Camera     },
+  { to: '/setup',        label: 'Setup',        icon: BookOpen   },
 ]
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
@@ -99,11 +101,12 @@ export default function App() {
       <main className="flex-1 max-w-screen-2xl w-full mx-auto px-4 py-4">
         <ErrorBoundary>
           <Routes>
-            <Route path="/"          element={<LiveDashboard />} />
-            <Route path="/analytics" element={<AnalyticsDashboard />} />
-            <Route path="/persons"   element={<PersonsPage />} />
-            <Route path="/cameras"   element={<CamerasPage />} />
-            <Route path="/setup"     element={<SetupGuidePage />} />
+            <Route path="/"             element={<LiveDashboard />} />
+            <Route path="/store-health" element={<StoreHealthPage />} />
+            <Route path="/analytics"    element={<AnalyticsDashboard />} />
+            <Route path="/persons"      element={<PersonsPage />} />
+            <Route path="/cameras"      element={<CamerasPage />} />
+            <Route path="/setup"        element={<SetupGuidePage />} />
           </Routes>
         </ErrorBoundary>
       </main>

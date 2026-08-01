@@ -22,7 +22,8 @@ from app.core.config import settings
 from app.models.person import Person
 from app.models.event import Event
 from app.models.media import Media
-from app.services.scoring import process_event_for_score, get_all_live_scores
+from app.services.scoring import process_event_for_score, get_all_live_scores, remove_person_state
+from app.services import confidence as confidence_engine
 from app.services.heatmap import record_position
 from app.services.alert_service import create_alert
 from app.services.storage import save_snapshot, get_file_url
@@ -74,9 +75,18 @@ async def _process_detection(db: AsyncSession, detection: Dict):
     # ── 1. Resolve person ────────────────────────────────────────────────────
     person = await _get_or_create_person(db, session_id, color, is_staff, camera_id)
 
+    # One-directional upgrade: a later frame with a clearer uniform-color
+    # match (or a Sensor Bus badge scan) can promote CUSTOMER -> STAFF, but
+    # never the reverse — demoting away from STAFF based on a noisy later
+    # frame would be a trivial evasion vector for an actual suspect.
+    if is_staff and person.person_type != "STAFF":
+        person.person_type = "STAFF"
+        logger.info(f"Person {session_id} upgraded to STAFF (uniform color match)")
+
     # Staff skip suspicion scoring
     if person.person_type == "STAFF":
         await _log_event(db, person, event_type, camera_id, bbox, pos_x, pos_y, confidence, zone, hold_dur)
+        confidence_engine.record_event(person.id, session_id, event_type, is_staff=True)
         await db.commit()
         await manager.broadcast("cameras", {
             "type": "detection",
@@ -96,6 +106,7 @@ async def _process_detection(db: AsyncSession, detection: Dict):
         db, person.id, session_id, event_type, camera_id,
         {"duration_seconds": hold_dur or 0}
     )
+    confidence_engine.record_event(person.id, session_id, score_result.get("reason", event_type), is_staff=False)
 
     # ── 4. Record heatmap ─────────────────────────────────────────────────────
     interaction_weight = 1.0
@@ -114,12 +125,21 @@ async def _process_detection(db: AsyncSession, detection: Dict):
     alert_payload = None
     current_score = score_result.get("score", 0)
 
+    # The flat score (scoring.py) and the multi-factor Confidence Score
+    # (confidence.py) weight the same event stream differently — they can
+    # genuinely diverge. confidence_escalated fires independently the first
+    # time the multi-factor read reaches "Escalate — High Confidence" (e.g.
+    # concealment + color-disappearance corroborating each other), even on a
+    # session where the flat score hasn't crossed its own threshold yet.
+    confidence_escalated = confidence_engine.check_and_mark_escalation(person.id)
+
     # BYPASS_REGISTER and EXIT_AFTER_PICK are always high-priority — alert regardless
     # of current score (a quick grab-and-run may not have built up score yet).
     # EXIT_STORE only alerts when suspicion is genuinely HIGH (score >= 61).
     # crossed_threshold fires the first time a person hits HIGH_SUSPICION on ANY event.
     should_alert = (
         score_result.get("crossed_threshold")
+        or confidence_escalated
         or event_type in ("BYPASS_REGISTER", "EXIT_AFTER_PICK")
         or (event_type == "EXIT_STORE" and current_score >= 61)
     )
@@ -140,6 +160,7 @@ async def _process_detection(db: AsyncSession, detection: Dict):
             db, person.id, session_id,
             score_result["score"], event_type, camera_id,
             snapshot_path=snap_path,
+            event_breakdown=confidence_engine.get_breakdown(person.id),
         )
         await dispatch_alert_notifications(alert, session_id)
         alert_payload = alert.to_dict()
@@ -178,6 +199,12 @@ async def _process_detection(db: AsyncSession, detection: Dict):
 
     if alert_payload:
         await manager.broadcast("alerts", {"type": "new_alert", "alert": alert_payload})
+
+    # Person has left the frame — drop their live score entry so it stops
+    # cluttering /api/persons/live-scores. History stays in the DB (Person/Event rows).
+    if event_type == "EXIT_STORE":
+        remove_person_state(person.id)
+        confidence_engine.remove_tally(person.id)
 
 
 async def _get_or_create_person(

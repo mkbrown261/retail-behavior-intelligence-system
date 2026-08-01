@@ -12,6 +12,7 @@ export const personAPI = {
   list:       (params = {}) => api.get('/persons', { params }),
   get:        (id) => api.get(`/persons/${id}`),
   timeline:   (id) => api.get(`/persons/${id}/timeline`),
+  confidence: (id) => api.get(`/persons/${id}/confidence`),
   events:     (id) => api.get(`/persons/${id}/events`),
   scores:     (id) => api.get(`/persons/${id}/score-history`),
   liveScores: ()  => api.get('/persons/live-scores'),
@@ -38,6 +39,7 @@ export const analyticsAPI = {
   reports:        () => api.get('/analytics/reports'),
   getReport:      (date) => api.get(`/analytics/reports/${date}`),
   generateReport: (date) => api.post('/analytics/reports/generate', null, { params: { date } }),
+  storeHealth:    (params = {}) => api.get('/analytics/store-health', { params }),
 }
 
 // Events
@@ -49,8 +51,6 @@ export const eventsAPI = {
 
 // Cameras
 export const cameraAPI = {
-  feeds:        ()              => api.get('/cameras/feeds'),
-  feed:         (id)            => api.get(`/cameras/${id}/feed`),
   wsStatus:     ()              => api.get('/ws/status'),
   list:         ()              => api.get('/cameras'),
   get:          (id)            => api.get(`/cameras/${id}`),
@@ -59,6 +59,10 @@ export const cameraAPI = {
   restart:      (id)            => api.post(`/cameras/${id}/restart`),
   snapshotB64:  (id, q = 70)    => api.get(`/cameras/${id}/snapshot.b64`, { params: { quality: q } }),
   intentStats:  ()              => api.get('/cameras/intent/stats'),
+  getZones:     (id)            => api.get(`/cameras/${id}/zones`),
+  saveZones:    (id, zones)     => api.put(`/cameras/${id}/zones`, zones),
+  getZoneLabels: (id)           => api.get(`/cameras/${id}/zone-labels`),
+  saveZoneLabels: (id, labels)  => api.put(`/cameras/${id}/zone-labels`, { labels }),
   discoverOnvif:(u = '', p = '') => api.post('/cameras/discover/onvif', { username: u, password: p }),
 }
 
