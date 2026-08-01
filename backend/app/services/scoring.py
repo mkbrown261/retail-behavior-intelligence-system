@@ -66,6 +66,7 @@ class LivePersonState:
         self.idle_since: Optional[datetime] = None
         self.has_interacted_with_item: bool = False
         self.visited_register: bool = False
+        self.bypass_register_emitted: bool = False
         self.hold_increments_applied: int = 0  # 10s increments already scored, for HOLD_ITEM
         self.idle_increments_applied: int = 0  # 10s increments already scored, for IDLE_10S decay
 
@@ -263,7 +264,8 @@ async def process_event_for_score(
 
     elif event_type == "BYPASS_REGISTER":
         state = await get_or_create_state(person_id, session_id)
-        if state.has_interacted_with_item and not state.visited_register:
+        if state.has_interacted_with_item and not state.visited_register and not state.bypass_register_emitted:
+            state.bypass_register_emitted = True
             result = await apply_score_delta(db, person_id, session_id, "BYPASS_REGISTER", camera_id)
         else:
             result = await apply_score_delta(db, person_id, session_id, "AVOID_REGISTER", camera_id)

@@ -10,7 +10,9 @@ The test DB is created fresh at the start of each test session.
 """
 import asyncio
 import os
+import shutil
 import sys
+import tempfile
 
 import pytest
 import pytest_asyncio
@@ -24,8 +26,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 _TEST_DB_FILE = os.path.join(os.path.dirname(__file__), "test_rbis.db")
 _TEST_DB_URL = f"sqlite+aiosqlite:///{_TEST_DB_FILE}"
 
-# Set env var BEFORE any app modules load so settings picks it up
+# Use a throwaway directory for anything that would otherwise write into
+# backend/data/ (PDF reports, zone_labels.json, camera_zones.json) — without
+# this, those tests silently pollute the real data directory.
+_TEST_STORAGE_DIR = tempfile.mkdtemp(prefix="rbis_test_data_")
+
+# Set env vars BEFORE any app modules load so settings picks them up
 os.environ["DATABASE_URL"] = _TEST_DB_URL
+os.environ["LOCAL_STORAGE_PATH"] = _TEST_STORAGE_DIR
 
 # ── App imports (after DATABASE_URL env var is set) ───────────────────────────
 from app.core.config import settings  # noqa: E402
@@ -80,6 +88,7 @@ async def create_tables():
     await _test_engine.dispose()
     if os.path.exists(_TEST_DB_FILE):
         os.remove(_TEST_DB_FILE)
+    shutil.rmtree(_TEST_STORAGE_DIR, ignore_errors=True)
 
 
 @pytest_asyncio.fixture(autouse=True)

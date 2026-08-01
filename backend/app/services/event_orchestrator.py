@@ -137,10 +137,18 @@ async def _process_detection(db: AsyncSession, detection: Dict):
     # of current score (a quick grab-and-run may not have built up score yet).
     # EXIT_STORE only alerts when suspicion is genuinely HIGH (score >= 61).
     # crossed_threshold fires the first time a person hits HIGH_SUSPICION on ANY event.
+    #
+    # Keyed off score_result["reason"] (what scoring.py actually decided),
+    # not the raw incoming event_type: BYPASS_REGISTER is only a genuine bypass
+    # if scoring.py's own has_interacted_with_item/visited_register/one-shot
+    # guard agreed — otherwise it silently falls back to AVOID_REGISTER. Using
+    # the raw event_type here would alert on every repeat post of the same
+    # sensor/camera event even when scoring.py declined to score it as a bypass.
+    score_reason = score_result.get("reason")
     should_alert = (
         score_result.get("crossed_threshold")
         or confidence_escalated
-        or event_type in ("BYPASS_REGISTER", "EXIT_AFTER_PICK")
+        or score_reason in ("BYPASS_REGISTER", "EXIT_AFTER_PICK")
         or (event_type == "EXIT_STORE" and current_score >= 61)
     )
     if should_alert:

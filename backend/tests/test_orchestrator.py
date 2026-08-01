@@ -109,11 +109,16 @@ async def test_exit_store_deactivates_person(db):
 
 @pytest.mark.asyncio
 async def test_bypass_register_low_score_creates_alert(db):
-    """Bug 1.3: BYPASS_REGISTER MUST create an Alert even at score 0."""
+    """
+    Bug 1.3: BYPASS_REGISTER MUST create an Alert even at low score, as long
+    as it's a genuine bypass (item interaction, register never visited) — the
+    real camera pipeline never emits BYPASS_REGISTER without items_held > 0,
+    which only happens after PICK_ITEM.
+    """
     _session_to_person_id.clear()
     sid = "Person_BYPASS_001"
-    # ENTER first (no score), then immediately BYPASS
     await _process_detection(db, _detection(sid, "ENTER_STORE"))
+    await _process_detection(db, _detection(sid, "PICK_ITEM"))
     await _process_detection(db, _detection(sid, "BYPASS_REGISTER"))
 
     result = await db.execute(
@@ -123,6 +128,52 @@ async def test_bypass_register_low_score_creates_alert(db):
     assert len(alerts) >= 1
     alert_types = [a.alert_type for a in alerts]
     assert "BYPASS_REGISTER" in alert_types
+
+
+@pytest.mark.asyncio
+async def test_bypass_register_without_item_interaction_does_not_alert(db):
+    """
+    A BYPASS_REGISTER with no prior item interaction is not a genuine bypass —
+    scoring.py falls back to the softer AVOID_REGISTER rule, and it should NOT
+    create a high-priority Alert (this was Bug: the old should_alert check keyed
+    off the raw event_type instead of what scoring.py actually decided).
+    """
+    _session_to_person_id.clear()
+    sid = "Person_BYPASS_NOITEM_001"
+    await _process_detection(db, _detection(sid, "ENTER_STORE"))
+    await _process_detection(db, _detection(sid, "BYPASS_REGISTER"))
+
+    result = await db.execute(select(Alert).where(Alert.session_id == sid))
+    alerts = result.scalars().all()
+    assert len(alerts) == 0
+
+
+@pytest.mark.asyncio
+async def test_bypass_register_repeated_sensor_posts_alert_once(db):
+    """
+    A flaky external sensor (RFID gate reader) retrying its POST, or the
+    camera pipeline re-evaluating the same lingering-near-exit state across
+    frames, must not create a duplicate Alert per repeat BYPASS_REGISTER event
+    for the same session — scoring.py's bypass_register_emitted one-shot guard
+    must actually suppress the resulting alert, not just the score delta.
+
+    Score is pre-seeded above HIGH_SUSPICION so crossed_threshold can't
+    independently trigger a second, legitimately-distinct alert mid-loop —
+    isolating the bypass-dedup behavior specifically.
+    """
+    _session_to_person_id.clear()
+    sid = "Person_BYPASS_REPEAT_001"
+    await _process_detection(db, _detection(sid, "ENTER_STORE"))
+    for _ in range(7):
+        await _process_detection(db, _detection(sid, "PICK_ITEM"))  # push score > 61
+
+    for _ in range(5):
+        await _process_detection(db, _detection(sid, "BYPASS_REGISTER"))
+
+    result = await db.execute(select(Alert).where(Alert.session_id == sid))
+    alerts = result.scalars().all()
+    bypass_alerts = [a for a in alerts if a.alert_type == "BYPASS_REGISTER"]
+    assert len(bypass_alerts) == 1
 
 
 @pytest.mark.asyncio

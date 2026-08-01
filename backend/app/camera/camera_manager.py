@@ -34,6 +34,7 @@ import yaml
 
 from app.camera.camera_stream import CameraConfig, CameraStream, CamType
 from app.camera.intent_layer import IntentBus, IntentType, intent_bus
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,9 @@ _CONFIG_SEARCH_PATHS = [
 # of cameras.yaml at camera-start time (UI-saved values win) rather than
 # rewriting the human-edited YAML file directly, which would destroy comments
 # and formatting on every save.
-_ZONE_OVERRIDES_PATH = _HERE / "data" / "camera_zones.json"
+# Derived from settings.LOCAL_STORAGE_PATH (not hardcoded to backend/data) so
+# tests can redirect it to a throwaway directory instead of polluting real data.
+_ZONE_OVERRIDES_PATH = Path(settings.LOCAL_STORAGE_PATH) / "camera_zones.json"
 
 
 def _load_zone_overrides() -> Dict[str, Dict]:
@@ -75,7 +78,7 @@ def save_zone_override(camera_id: str, zones: Dict) -> None:
 # a display concern, separate from the zone THRESHOLDS above which drive
 # actual detection behavior. A store owner naming their zones doesn't change
 # what the system detects, only how it's labeled back to them.
-_ZONE_LABELS_PATH = _HERE / "data" / "zone_labels.json"
+_ZONE_LABELS_PATH = Path(settings.LOCAL_STORAGE_PATH) / "zone_labels.json"
 
 # The fixed zone codes _cx_to_zone() (in ai_inference.py) can produce —
 # duplicated here rather than imported to avoid a camera<->ai_inference
